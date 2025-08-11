@@ -1,6 +1,6 @@
 package com.hanto.aischeduler
 
-import com.hanto.aischeduler.data.GroqApiService
+import com.hanto.aischeduler.data.api.GroqApiService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn

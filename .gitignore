@@ -13,3 +13,27 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+*.keystore
+*.jks
+
+# Build and Cache
+build/
+.gradle/
+.idea/
+*.hprof
+
+# Logs and Debug
+*.log
+logcat.txt
+
+# Testing
+/androidTest-results/
+
+# Temporary files
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo

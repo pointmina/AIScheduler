@@ -31,7 +31,7 @@ fun AIGenerateButton(
         modifier = modifier
             .fillMaxWidth()
             .height(56.dp),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = AppColors.PrimaryVariant,
             disabledContainerColor = PrimaryBlueLight

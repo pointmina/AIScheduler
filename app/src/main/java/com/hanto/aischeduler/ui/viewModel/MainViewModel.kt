@@ -1,8 +1,8 @@
-package com.hanto.aischeduler
+package com.hanto.aischeduler.ui.viewModel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.hanto.aischeduler.data.ScheduleRepository
+import com.hanto.aischeduler.data.repository.ScheduleRepository
 import com.hanto.aischeduler.data.model.Task
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow

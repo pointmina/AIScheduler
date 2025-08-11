@@ -1,4 +1,4 @@
-package com.hanto.aischeduler.data
+package com.hanto.aischeduler.data.api
 
 import com.hanto.aischeduler.data.model.GroqRequest
 import com.hanto.aischeduler.data.model.GroqResponse

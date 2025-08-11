@@ -1,5 +1,6 @@
 package com.hanto.aischeduler.ui.components
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanto.aischeduler.ui.theme.AppColors
+import com.hanto.aischeduler.ui.theme.PrimaryNavy
 
 @Composable
 fun TaskInputCard(
@@ -52,10 +54,17 @@ fun TaskInputCard(
                         fontSize = 14.sp
                     )
                 },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(55.dp)
+                    .border(
+                        width = 1.dp,
+                        color = PrimaryNavy,
+                        shape = RoundedCornerShape(12.dp)
+                    ),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AppColors.Primary,
+                    focusedBorderColor = PrimaryNavy,
                     unfocusedBorderColor = AppColors.Border
                 ),
                 singleLine = true
@@ -68,6 +77,7 @@ fun TaskInputCard(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AppColors.Primary
                 ),
+                modifier = Modifier.height(55.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text("+ 추가", fontSize = 12.sp)
