@@ -19,20 +19,24 @@ class ScheduleRepository @Inject constructor(
         tasks: List<String>,
         date: String,
         startTime: String = "09:00",
-        endTime: String = "18:00"
+        endTime: String = "18:00",
+        includeBreaks: Boolean = false, // 휴식시간 포함 여부 추가
+        breakDuration: Int = 15 // 휴식시간 길이 추가
     ): List<Task> {
         try {
             val prompt = createSchedulePrompt(
                 tasks = tasks,
                 date = date,
                 startTime = startTime,
-                endTime = endTime
+                endTime = endTime,
+                includeBreaks = includeBreaks,
+                breakDuration = breakDuration
             )
             val request = GroqRequest(
                 messages = listOf(
                     GroqMessage(
                         role = "system",
-                        content = getSystemPrompt(startTime, endTime)
+                        content = getSystemPrompt(startTime, endTime, includeBreaks, breakDuration)
                     ),
                     GroqMessage(
                         role = "user",
@@ -51,12 +55,12 @@ class ScheduleRepository @Inject constructor(
                 Log.d("ScheduleRepository", "AI Response: $scheduleText")
 
                 return if (scheduleText.isNullOrBlank()) {
-                    createDefaultSchedule(tasks, date, startTime, endTime)
+                    createDefaultSchedule(tasks, date, startTime, endTime, includeBreaks, breakDuration)
                 } else {
                     val parsedTasks = parseScheduleResponse(scheduleText, date)
                     parsedTasks.ifEmpty {
                         Log.d("ScheduleRepository", "Parsing failed, creating default schedule")
-                        createDefaultSchedule(tasks, date, startTime, endTime)
+                        createDefaultSchedule(tasks, date, startTime, endTime, includeBreaks, breakDuration)
                     }
                 }
             } else {
@@ -65,17 +69,19 @@ class ScheduleRepository @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e("ScheduleRepository", "Error: ${e.message}")
-            return createDefaultSchedule(tasks, date, startTime, endTime)
+            return createDefaultSchedule(tasks, date, startTime, endTime, includeBreaks, breakDuration)
         }
     }
 
-    //기본 스케줄 생성 - 시간대 파라미터 적용
+    // 기본 스케줄 생성 - 휴식시간 옵션 반영
     @SuppressLint("DefaultLocale")
     private fun createDefaultSchedule(
         tasks: List<String>,
         date: String,
         startTime: String,
-        endTime: String
+        endTime: String,
+        includeBreaks: Boolean,
+        breakDuration: Int
     ): List<Task> {
         val scheduleList = mutableListOf<Task>()
 
@@ -89,7 +95,7 @@ class ScheduleRepository @Inject constructor(
         val endMinute = endTimeParts[1].toInt()
         val totalEndMinutes = endHour * 60 + endMinute
 
-        // 시간대별 휴식시간 설정
+        // 시간대별 설정
         val isEveningTime = currentHour >= 18
         val isMorningTime = currentHour < 12
 
@@ -103,9 +109,9 @@ class ScheduleRepository @Inject constructor(
 
             // 작업 시간 할당 (시간대별 조정)
             val taskDuration = when {
-                isEveningTime -> 60
-                isMorningTime -> 90
-                else -> 90
+                isEveningTime -> 60 // 저녁: 1시간씩
+                isMorningTime -> 90 // 아침: 1.5시간씩
+                else -> 90 // 기본: 1.5시간씩
             }
 
             currentMinute += taskDuration
@@ -132,12 +138,12 @@ class ScheduleRepository @Inject constructor(
                 )
             )
 
-            // 시간대별 휴식시간 추가
-            if (index < tasks.size - 1) {
-                addRestTime(scheduleList, date, currentHour, currentMinute, isEveningTime)
+            // 휴식시간 추가 (사용자가 선택한 경우에만)
+            if (includeBreaks && index < tasks.size - 1) {
+                addRestTime(scheduleList, date, currentHour, currentMinute, breakDuration)
 
                 // 휴식 시간만큼 현재 시간 증가
-                currentMinute += if (isEveningTime) 15 else 30
+                currentMinute += breakDuration
                 currentHour += currentMinute / 60
                 currentMinute %= 60
             }
@@ -159,19 +165,19 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    // 휴식시간 추가
+    // 휴식시간 추가 (사용자 설정 반영)
+    @SuppressLint("DefaultLocale")
     private fun addRestTime(
         scheduleList: MutableList<Task>,
         date: String,
         hour: Int,
         minute: Int,
-        isEveningTime: Boolean
+        breakDuration: Int
     ) {
-        val restDuration = if (isEveningTime) 15 else 30
         val restStartTime = String.format("%02d:%02d", hour, minute)
 
-        var restEndMinute = minute + restDuration
-        var restEndHour = hour + restEndMinute / 60
+        var restEndMinute = minute + breakDuration
+        val restEndHour = hour + restEndMinute / 60
         restEndMinute %= 60
 
         val restEndTime = String.format("%02d:%02d", restEndHour, restEndMinute)
@@ -179,8 +185,8 @@ class ScheduleRepository @Inject constructor(
         scheduleList.add(
             Task(
                 id = "${date}_rest_${scheduleList.size}",
-                title = if (isEveningTime) "간단한 휴식" else "커피 타임",
-                description = if (isEveningTime) "잠깐 쉬어가세요" else "재충전 시간",
+                title = if (breakDuration <= 15) "간단한 휴식" else "커피 타임",
+                description = "재충전 시간 - ${breakDuration}분",
                 startTime = restStartTime,
                 endTime = restEndTime,
                 date = date
@@ -229,8 +235,13 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    // 시스템 프롬프트 - 시간대 정보 포함
-    private fun getSystemPrompt(startTime: String, endTime: String): String {
+    // 시스템 프롬프트 - 휴식시간 옵션 반영
+    private fun getSystemPrompt(
+        startTime: String,
+        endTime: String,
+        includeBreaks: Boolean,
+        breakDuration: Int
+    ): String {
         val hour = startTime.split(":")[0].toInt()
         val timeContext = when {
             hour >= 19 -> "저녁 시간대로 가벼운 활동과 휴식 위주로 배치해주세요."
@@ -239,26 +250,35 @@ class ScheduleRepository @Inject constructor(
             else -> "심야 시간대로 가벼운 활동만 포함해주세요."
         }
 
+        val breakInstruction = if (includeBreaks) {
+            "각 작업 사이에 ${breakDuration}분의 휴식시간을 포함해주세요."
+        } else {
+            "휴식시간 없이 연속적으로 작업을 배치해주세요."
+        }
+
         return """
 당신은 효율적인 일정 관리 전문가입니다.
 현재 시간대: $startTime ~ $endTime
 시간대 특성: $timeContext
+휴식시간 설정: $breakInstruction
 
 다음 규칙에 따라 시간대별 스케줄을 생성해주세요:
 1. 반드시 "$startTime" 이후부터 시작
 2. "$endTime" 이전에 모든 일정 완료
 3. 반드시 "HH:MM-HH:MM: 작업명" 형식으로 응답
 4. 각 작업은 30분~2시간 사이로 배치
-5. 저녁 시간대라면 점심시간 대신 간단한 휴식시간 포함
+5. 휴식시간 설정에 따라 조정
         """.trimIndent()
     }
 
-    // 프롬프트 생성
+    // 프롬프트 생성 - 휴식시간 옵션 반영
     private fun createSchedulePrompt(
         tasks: List<String>,
         date: String,
         startTime: String,
-        endTime: String
+        endTime: String,
+        includeBreaks: Boolean,
+        breakDuration: Int
     ): String {
         val tasksText = tasks.joinToString("\n") { "- $it" }
         val hour = startTime.split(":")[0].toInt()
@@ -270,9 +290,16 @@ class ScheduleRepository @Inject constructor(
             else -> "집중할 수 있는 시간대입니다."
         }
 
+        val breakInfo = if (includeBreaks) {
+            "휴식시간: 각 작업 사이에 ${breakDuration}분씩 포함"
+        } else {
+            "휴식시간: 없음 (연속 작업)"
+        }
+
         return """
 오늘 날짜: $date
 시간 범위: $startTime ~ $endTime
+$breakInfo
 조언: $timeAdvice
 
 해야 할 일:
@@ -282,13 +309,13 @@ $tasksText
 반드시 다음 형식으로 여러 줄에 걸쳐 답변해주세요:
 
 $startTime-XX:XX: 첫 번째 작업
-XX:XX-XX:XX: 휴식
-XX:XX-XX:XX: 두 번째 작업
+${if (includeBreaks) "XX:XX-XX:XX: 휴식\nXX:XX-XX:XX: 두 번째 작업" else "XX:XX-XX:XX: 두 번째 작업"}
 
 주의사항:
 - 반드시 $startTime 부터 시작
 - $endTime 전에 완료
 - 각 작업은 최소 30분, 최대 2시간
+- ${if (includeBreaks) "휴식시간 ${breakDuration}분 포함" else "휴식시간 없음"}
         """.trimIndent()
     }
 
