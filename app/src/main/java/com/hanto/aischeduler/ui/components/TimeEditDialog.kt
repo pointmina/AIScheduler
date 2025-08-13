@@ -1,17 +1,33 @@
 package com.hanto.aischeduler.ui.components
 
 import android.annotation.SuppressLint
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanto.aischeduler.ui.theme.AppColors
-import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -19,15 +35,17 @@ fun TimeEditDialog(
     initialStartTime: String,
     initialEndTime: String,
     onTimeConfirm: (String, String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onConflictDetected: (String) -> Unit = {} // 충돌 감지 콜백 추가
 ) {
     var startTime by remember { mutableStateOf(initialStartTime) }
     var endTime by remember { mutableStateOf(initialEndTime) }
     var showStartTimePicker by remember { mutableStateOf(false) }
     var showEndTimePicker by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var warningMessage by remember { mutableStateOf("") }
 
-    // 시간 검증 함수
+    // 시간 검증 및 충돌 감지 함수
     fun validateTimes(): Boolean {
         val startMinutes = timeToMinutes(startTime)
         val endMinutes = timeToMinutes(endTime)
@@ -35,14 +53,25 @@ fun TimeEditDialog(
         return when {
             endMinutes <= startMinutes -> {
                 errorMessage = "종료 시간은 시작 시간보다 늦어야 합니다"
+                warningMessage = ""
                 false
             }
+
             endMinutes - startMinutes < 30 -> {
                 errorMessage = "최소 30분 이상의 시간이 필요합니다"
+                warningMessage = ""
                 false
             }
+
+            endMinutes - startMinutes > 180 -> {
+                errorMessage = ""
+                warningMessage = "3시간을 초과하면 다른 일정과 충돌할 수 있습니다"
+                true
+            }
+
             else -> {
                 errorMessage = ""
+                warningMessage = ""
                 true
             }
         }
@@ -79,14 +108,38 @@ fun TimeEditDialog(
                 if (duration > 0) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = AppColors.Primary.copy(alpha = 0.1f)
+                        color = when {
+                            duration > 180 -> AppColors.Warning.copy(alpha = 0.1f)
+                            else -> AppColors.Primary.copy(alpha = 0.1f)
+                        }
                     ) {
                         Text(
-                            text = "⏱️ 소요시간: ${formatDuration(duration)}",
+                            text = "⏱️ 소요시간: ${formatDuration(duration)}${if (duration > 180) " (장시간)" else ""}",
                             modifier = Modifier.padding(8.dp),
                             fontSize = 12.sp,
-                            color = AppColors.Primary
+                            color = if (duration > 180) AppColors.Warning else AppColors.Primary
                         )
+                    }
+                }
+
+                // 충돌 가능성 경고
+                if (warningMessage.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = AppColors.Warning.copy(alpha = 0.1f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("⚠️", fontSize = 14.sp)
+                            Text(
+                                text = warningMessage,
+                                fontSize = 12.sp,
+                                color = AppColors.Warning
+                            )
+                        }
                     }
                 }
 
@@ -96,12 +149,43 @@ fun TimeEditDialog(
                         shape = RoundedCornerShape(8.dp),
                         color = AppColors.Warning.copy(alpha = 0.1f)
                     ) {
-                        Text(
-                            text = "⚠️ $errorMessage",
+                        Row(
                             modifier = Modifier.padding(8.dp),
-                            fontSize = 12.sp,
-                            color = AppColors.Warning
-                        )
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("❌", fontSize = 14.sp)
+                            Text(
+                                text = errorMessage,
+                                fontSize = 12.sp,
+                                color = AppColors.Warning
+                            )
+                        }
+                    }
+                }
+
+                // 스마트 제안
+                if (duration > 180 && errorMessage.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = AppColors.Primary.copy(alpha = 0.1f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "💡 제안",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AppColors.Primary
+                            )
+                            Text(
+                                text = "긴 작업은 여러 개로 나누거나 중간에 휴식을 추가하는 것이 좋습니다.",
+                                fontSize = 11.sp,
+                                color = AppColors.TextSecondary
+                            )
+                        }
                     }
                 }
             }
@@ -110,14 +194,25 @@ fun TimeEditDialog(
             Button(
                 onClick = {
                     if (validateTimes()) {
+                        if (warningMessage.isNotEmpty()) {
+                            // 충돌 가능성이 있을 때 콜백 호출
+                            onConflictDetected("시간 변경으로 인해 다른 일정과 충돌할 수 있습니다.")
+                        }
                         onTimeConfirm(startTime, endTime)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AppColors.Primary
-                )
+                    containerColor = when {
+                        errorMessage.isNotEmpty() -> AppColors.TextSecondary
+                        warningMessage.isNotEmpty() -> AppColors.Warning
+                        else -> AppColors.Primary
+                    }
+                ),
+                enabled = errorMessage.isEmpty()
             ) {
-                Text("확인")
+                Text(
+                    if (warningMessage.isNotEmpty()) "주의해서 적용" else "확인"
+                )
             }
         },
         dismissButton = {

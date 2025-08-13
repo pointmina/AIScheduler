@@ -21,7 +21,6 @@ val DarkSurface = Color(0xFF1E293B)
 val DarkTextPrimary = Color(0xFFF1F5F9)
 val DarkTextSecondary = Color(0xFF94A3B8)
 
-// 기존 AppColors는 새로운 색상으로 매핑
 object AppColors {
     val Primary = PrimaryNavy
     val PrimaryVariant = PrimaryBlueLight

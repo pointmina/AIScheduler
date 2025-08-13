@@ -49,6 +49,7 @@ fun MainScreen(
         ScheduleResultScreen(
             tasks = uiState.generatedSchedule,
             isEditMode = uiState.isEditMode,
+            errorMessage = uiState.errorMessage,
             onBack = { viewModel.backToInput() },
             onToggleEditMode = { viewModel.toggleEditMode() },
             onReorderTasks = { fromIndex, toIndex ->
@@ -57,6 +58,9 @@ fun MainScreen(
             onUpdateTaskTime = { taskId, startTime, endTime ->
                 viewModel.updateTaskTime(taskId, startTime, endTime)
             },
+            onCompressSchedule = { viewModel.compressSchedule() },
+            onExtendEndTime = { viewModel.extendEndTime() },
+            onClearError = { viewModel.clearError() },
             onSave = {
                 // TODO: 저장 기능
             },
@@ -67,7 +71,6 @@ fun MainScreen(
         return
     }
 
-    // 기존 입력 화면 코드는 그대로...
     SolidBackground {
         Column(
             modifier = Modifier
@@ -130,7 +133,7 @@ fun MainScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.2f)
+                        .weight(0.20f)
                 )
 
                 // 할 일 목록 카드

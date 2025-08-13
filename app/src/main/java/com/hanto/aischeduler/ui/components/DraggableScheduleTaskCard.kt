@@ -4,17 +4,26 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,6 +39,7 @@ fun DraggableScheduleTaskCard(
     onDragStart: () -> Unit,
     onDragEnd: () -> Unit,
     onTimeEdit: (String, String) -> Unit,
+    onConflictDetected: (String) -> Unit = {}, // 충돌 감지 콜백 추가
     modifier: Modifier = Modifier
 ) {
     var showTimeEditDialog by remember { mutableStateOf(false) }
@@ -49,20 +59,13 @@ fun DraggableScheduleTaskCard(
             .scale(cardScale)
             .let { mod ->
                 if (isEditMode) {
-                    mod
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDragStart = { onDragStart() },
-                                onDragEnd = { onDragEnd() }
-                            ) { _, _ -> }
+                    mod.combinedClickable(
+                        onClick = { showTimeEditDialog = true },
+                        onLongClick = {
+                            // 길게 누르면 드래그 모드 시작 (현재는 비활성화)
+                            // onDragStart()
                         }
-                        .combinedClickable(
-                            onClick = { showTimeEditDialog = true },
-                            onLongClick = {
-                                // 길게 누르면 드래그 모드 시작
-                                onDragStart()
-                            }
-                        )
+                    )
                 } else {
                     mod
                 }
@@ -72,14 +75,14 @@ fun DraggableScheduleTaskCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 드래그 핸들 (편집 모드일 때만 표시)
+            // 편집 모드 표시 (드래그 핸들 대신)
             if (isEditMode) {
                 Icon(
-                    imageVector = Icons.Default.DragHandle,
-                    contentDescription = "드래그하여 순서 변경",
-                    tint = AppColors.TextSecondary,
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "편집 가능",
+                    tint = AppColors.Warning,
                     modifier = Modifier
-                        .size(24.dp)
+                        .size(20.dp)
                         .padding(end = 8.dp)
                 )
             }
@@ -129,11 +132,11 @@ fun DraggableScheduleTaskCard(
                 }
             }
 
-            // 편집 모드 표시
-            if (isEditMode) {
+            // 충돌 경고 표시
+            if (task.description.contains("자동 조정됨") || task.description.contains("압축됨")) {
                 Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "편집 가능",
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "시간 조정됨",
                     tint = AppColors.Warning,
                     modifier = Modifier.size(16.dp)
                 )
@@ -150,7 +153,11 @@ fun DraggableScheduleTaskCard(
                 onTimeEdit(startTime, endTime)
                 showTimeEditDialog = false
             },
-            onDismiss = { showTimeEditDialog = false }
+            onDismiss = { showTimeEditDialog = false },
+            onConflictDetected = { message ->
+                onConflictDetected(message)
+                showTimeEditDialog = false
+            }
         )
     }
 }
