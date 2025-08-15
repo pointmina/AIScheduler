@@ -116,13 +116,6 @@ fun DraggableScheduleTaskCard(
                     fontWeight = FontWeight.Medium,
                     color = AppColors.OnSurface
                 )
-                if (task.description.isNotEmpty()) {
-                    Text(
-                        text = task.description,
-                        fontSize = 12.sp,
-                        color = AppColors.TextSecondary
-                    )
-                }
             }
 
             // 충돌 경고 표시

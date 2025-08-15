@@ -125,7 +125,7 @@ class ScheduleRepository @Inject constructor(
                 Task(
                     id = "${date}_${index}",
                     title = task,
-                    description = getTaskDescription(task, isEveningTime),
+                    description = "",
                     startTime = startT,
                     endTime = endT,
                     date = date
@@ -139,15 +139,6 @@ class ScheduleRepository @Inject constructor(
         return scheduleList.sortedBy { it.startTime }
     }
 
-    // 시간대별 작업 설명 생성
-    private fun getTaskDescription(task: String, isEveningTime: Boolean): String {
-        return when {
-            isEveningTime -> "저녁 시간 - 편안하게 진행하세요"
-            task.contains("운동", ignoreCase = true) -> "몸과 마음을 건강하게!"
-            task.contains("공부", ignoreCase = true) -> "집중해서 학습해보세요"
-            else -> "AI가 추천한 시간"
-        }
-    }
 
     // 특별 이벤트 추가 (식사시간 등)
     private fun addSpecialEvents(
@@ -167,7 +158,6 @@ class ScheduleRepository @Inject constructor(
                     Task(
                         id = "${date}_lunch",
                         title = "점심시간",
-                        description = "맛있는 점심 드세요",
                         startTime = "12:00",
                         endTime = "13:00",
                         date = date
@@ -195,39 +185,28 @@ class ScheduleRepository @Inject constructor(
         startTime: String,
         endTime: String
     ): String {
-        val hour = startTime.split(":")[0].toInt()
-        val timeContext = when {
-            hour >= 19 -> "저녁: 에너지가 떨어질 가능성이 크니, 집중도가 낮은 작업과 가벼운 활동 위주로 배치"
-            hour >= 12 -> "오후: 집중력이 점차 떨어지므로, 중요한 업무와 단순 업무를 균형 있게 배치"
-            hour >= 6 -> "아침: 집중력과 에너지가 가장 높으니, 중요·고난이도 업무를 먼저 배치"
-            else -> "심야: 체력 소모가 큰 작업은 피하고, 짧고 가벼운 활동만 포함"
-        }
 
         return """
-당신은 '전문 일정 설계 AI'입니다.
-현재 시간 범위: $startTime ~ $endTime
-시간대 특성: $timeContext
+You are a "Professional Schedule Planning AI".
+Current time range: $startTime ~ $endTime
 
-목표:
-- 주어진 작업을 효율적으로 배치하여 생산성 향상
-- 중요한 작업은 피로가 누적되기 전 시간대에 우선 배치
-- 단순·반복 작업은 집중력이 낮은 시간대에 배치
+Goal:
+- Arrange all given tasks efficiently to maximize productivity.
 
-제약 조건:
-1. 모든 일정은 "$startTime" 이후 시작, "$endTime" 이전 종료
-2. 각 작업은 60분~2시간 사이
-3. **모든 작업은 빠짐 없이 시간 안에 배치** (작업 시간 단축 또는 병합)
-4. 출력 형식: "HH:MM-HH:MM: 작업명"
-5. 작업 분할 및 중복 배치 금지
-6. 임의로 휴식 배치 금지
+Constraints:
+1. All tasks must start after "$startTime" and finish before "$endTime".
+2. **All given tasks must be scheduled within the time range** (shorten or merge tasks if needed).
+3. Output format: "HH:MM-HH:MM: Task Name"
+4. Do not split tasks into multiple time slots.
+5. Do not place any breaks unless they are explicitly listed as tasks.
+6. Only include the provided tasks in the schedule. **Do not create or add any new tasks**.
+7. Final answer must be written in Korean.
 
-출력 예시:
-08:00-09:30: 보고서 초안 작성
-09:30-10:20: 이메일 확인 및 회신
+Output format:
+HH:MM-HH:MM: [Exact Task Name]
 ...
 """
     }
-
 
     private fun createSchedulePrompt(
         tasks: List<String>,
@@ -238,22 +217,26 @@ class ScheduleRepository @Inject constructor(
         val tasksText = tasks.joinToString("\n") { "- $it" }
 
         return """
-날짜: $date
-시간 범위: $startTime ~ $endTime
+Date: $date
+Time range: $startTime ~ $endTime
 
-할 일 목록:
+Task list:
 $tasksText
 
-중요: 반드시 위에 나열된 작업들만 스케줄에 포함하고, 추가 작업을 임의로 생성하지 마세요.
+Important:
+- Include only the tasks listed above in the schedule. Do not create any additional tasks.
+- The output must be entirely in Korean.
 
-구성 원칙:
-- **모든 작업은 빠짐 없이 시간 안에 배치** (작업 시간 단축)
-- 각 시간 구간은 시작과 종료 시간이 명확해야 함
-- 작업 분할 및 중복 배치 금지
-- 임의로 휴식 배치 금지
+Rules for scheduling:
+1. **All tasks must be scheduled within the time range** (shorten durations if needed).
+2. Each time block must have a clear start and end time.
+3. Do not split tasks into multiple slots.
+4. No duplicate task entries.
+5. Do not add breaks unless they are given as tasks.
+6. Only use the exact task names provided.
 
-출력 형식:
-HH:MM-HH:MM: [정확한 작업명]
+Output format:
+HH:MM-HH:MM: [Exact Task Name]
 """
     }
 
@@ -310,7 +293,7 @@ HH:MM-HH:MM: [정확한 작업명]
                         Task(
                             id = "${date}_${index}",
                             title = taskName,
-                            description = "AI가 생성한 일정",
+                            description = "",
                             startTime = startTime,
                             endTime = endTime,
                             date = date
