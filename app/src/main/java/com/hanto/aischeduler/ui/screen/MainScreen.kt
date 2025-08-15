@@ -58,7 +58,7 @@ fun MainScreen(
             onUpdateTaskTime = { taskId, startTime, endTime ->
                 viewModel.updateTaskTime(taskId, startTime, endTime)
             },
-            onCompressSchedule = { viewModel.compressSchedule() },
+            onSplitSchedule = { viewModel.splitSchedule() }, // 압축 대신 분할로 변경
             onExtendEndTime = { viewModel.extendEndTime() },
             onClearError = { viewModel.clearError() },
             onSave = {
@@ -110,15 +110,11 @@ fun MainScreen(
                 TimeSettingCard(
                     startTime = uiState.startTime,
                     endTime = uiState.endTime,
-                    includeBreaks = uiState.includeBreaks,
-                    breakDuration = uiState.breakDuration,
                     onStartTimeChange = { viewModel.updateStartTime(it) },
                     onEndTimeChange = { viewModel.updateEndTime(it) },
-                    onToggleBreaks = { viewModel.toggleBreaks() },
-                    onBreakDurationChange = { viewModel.updateBreakDuration(it) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(0.45f)
+                        .weight(0.3f)
                 )
 
                 // 할 일 입력 카드
@@ -158,6 +154,46 @@ fun MainScreen(
                         .fillMaxWidth()
                         .weight(0.1f)
                 )
+
+                // 에러 메시지 및 안내
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(0.1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 에러 메시지
+                    uiState.errorMessage?.let { error ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = AppColors.Warning.copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                text = "⚠️ $error",
+                                modifier = Modifier.padding(12.dp),
+                                color = AppColors.Warning,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    // 할 일이 없을 때 안내
+                    if (uiState.tasks.isEmpty() && !uiState.isLoading) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = AppColors.Warning.copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                text = "⚠️ 할 일을 하나 이상 추가해주세요",
+                                modifier = Modifier.padding(12.dp),
+                                color = AppColors.Warning,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }

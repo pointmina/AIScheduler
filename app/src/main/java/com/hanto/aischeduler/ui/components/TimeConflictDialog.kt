@@ -1,11 +1,22 @@
 package com.hanto.aischeduler.ui.components
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -16,7 +27,7 @@ import com.hanto.aischeduler.ui.theme.AppColors
 @Composable
 fun TimeConflictDialog(
     conflictMessage: String,
-    onCompressSchedule: () -> Unit,
+    onSplitSchedule: () -> Unit,
     onExtendEndTime: () -> Unit,
     onCancel: () -> Unit,
     onDismiss: () -> Unit
@@ -69,10 +80,10 @@ fun TimeConflictDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     ConflictResolutionOption(
-                        icon = "⚡",
-                        title = "스케줄 압축",
-                        description = "각 작업 시간을 줄여서 맞춰요",
-                        onClick = onCompressSchedule
+                        icon = "✂️",
+                        title = "스케줄 분할",
+                        description = "고정 일정을 피해서 작업을 나눠요",
+                        onClick = onSplitSchedule
                     )
 
                     ConflictResolutionOption(

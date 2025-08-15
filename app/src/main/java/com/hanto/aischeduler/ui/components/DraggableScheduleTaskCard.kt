@@ -36,18 +36,11 @@ fun DraggableScheduleTaskCard(
     task: Task,
     isEditMode: Boolean,
     isDragging: Boolean,
-    onDragStart: () -> Unit,
-    onDragEnd: () -> Unit,
     onTimeEdit: (String, String) -> Unit,
     onConflictDetected: (String) -> Unit = {}, // 충돌 감지 콜백 추가
     modifier: Modifier = Modifier
 ) {
     var showTimeEditDialog by remember { mutableStateOf(false) }
-
-    val cardElevation by animateDpAsState(
-        targetValue = if (isDragging) 8.dp else 2.dp,
-        label = "cardElevation"
-    )
 
     val cardScale by animateFloatAsState(
         targetValue = if (isDragging) 1.05f else 1f,
@@ -118,7 +111,7 @@ fun DraggableScheduleTaskCard(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = getTaskEmoji(task.title) + " " + task.title,
+                    text = task.title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = AppColors.OnSurface
@@ -159,19 +152,5 @@ fun DraggableScheduleTaskCard(
                 showTimeEditDialog = false
             }
         )
-    }
-}
-
-// 작업에 맞는 이모지 반환
-private fun getTaskEmoji(title: String): String {
-    return when {
-        title.contains("운동", ignoreCase = true) -> "💪"
-        title.contains("점심", ignoreCase = true) || title.contains("식사", ignoreCase = true) -> "🍽️"
-        title.contains("회의", ignoreCase = true) || title.contains("미팅", ignoreCase = true) -> "💼"
-        title.contains("공부", ignoreCase = true) || title.contains("학습", ignoreCase = true) -> "📚"
-        title.contains("휴식", ignoreCase = true) || title.contains("커피", ignoreCase = true) -> "☕"
-        title.contains("프로젝트", ignoreCase = true) || title.contains("작업", ignoreCase = true) -> "💻"
-        title.contains("쇼핑", ignoreCase = true) -> "🛒"
-        else -> "📝"
     }
 }

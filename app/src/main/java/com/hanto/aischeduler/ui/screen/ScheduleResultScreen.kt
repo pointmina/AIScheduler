@@ -60,7 +60,7 @@ fun ScheduleResultScreen(
     onToggleEditMode: () -> Unit,
     onReorderTasks: (Int, Int) -> Unit,
     onUpdateTaskTime: (String, String, String) -> Unit,
-    onCompressSchedule: () -> Unit,
+    onSplitSchedule: () -> Unit, // 압축 대신 분할로 변경
     onExtendEndTime: () -> Unit,
     onClearError: () -> Unit,
     onSave: () -> Unit = {},
@@ -198,8 +198,6 @@ fun ScheduleResultScreen(
                         task = task,
                         isEditMode = isEditMode,
                         isDragging = draggedTaskIndex == index,
-                        onDragStart = { draggedTaskIndex = index },
-                        onDragEnd = { draggedTaskIndex = -1 },
                         onTimeEdit = { startTime, endTime ->
                             onUpdateTaskTime(task.id, startTime, endTime)
                         },
@@ -256,8 +254,8 @@ fun ScheduleResultScreen(
     if (showConflictDialog) {
         TimeConflictDialog(
             conflictMessage = conflictMessage,
-            onCompressSchedule = {
-                onCompressSchedule()
+            onSplitSchedule = { // 압축 대신 분할로 변경
+                onSplitSchedule()
                 showConflictDialog = false
                 onClearError()
             },
