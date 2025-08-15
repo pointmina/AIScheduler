@@ -1,9 +1,10 @@
 package com.hanto.aischeduler.ui.viewModel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.hanto.aischeduler.data.repository.ScheduleRepository
 import com.hanto.aischeduler.data.model.Task
+import com.hanto.aischeduler.data.repository.ScheduleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,19 +47,6 @@ class ScheduleViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(endTime = time)
     }
 
-    // 휴식시간 설정 함수들 추가
-    fun toggleBreaks() {
-        _uiState.update {
-            it.copy(includeBreaks = !it.includeBreaks)
-        }
-    }
-
-    fun updateBreakDuration(duration: Int) {
-        _uiState.update {
-            it.copy(breakDuration = duration)
-        }
-    }
-
     // 편집 모드 토글
     fun toggleEditMode() {
         _uiState.update {
@@ -71,7 +59,8 @@ class ScheduleViewModel @Inject constructor(
         val currentTasks = _uiState.value.generatedSchedule.toMutableList()
 
         if (fromIndex < 0 || toIndex < 0 ||
-            fromIndex >= currentTasks.size || toIndex >= currentTasks.size) {
+            fromIndex >= currentTasks.size || toIndex >= currentTasks.size
+        ) {
             return
         }
 
@@ -147,7 +136,8 @@ class ScheduleViewModel @Inject constructor(
             // 이전 Task와 겹치는지 확인
             if (timeToMinutes(prevTask.endTime) > timeToMinutes(currentTask.startTime)) {
                 // 겹치면 현재 Task를 뒤로 밀기
-                val taskDuration = timeToMinutes(currentTask.endTime) - timeToMinutes(currentTask.startTime)
+                val taskDuration =
+                    timeToMinutes(currentTask.endTime) - timeToMinutes(currentTask.startTime)
                 val newStartTime = prevTask.endTime
                 val newEndTime = minutesToTime(timeToMinutes(newStartTime) + taskDuration)
 
@@ -172,11 +162,9 @@ class ScheduleViewModel @Inject constructor(
         return sortedTasks
     }
 
-    // 고정 Task 여부 확인 (점심시간, 휴식시간 등)
+    // 고정 Task 여부 확인 (점심시간만)
     private fun isFixedTask(task: Task): Boolean {
         return task.title.contains("점심") ||
-                task.title.contains("휴식") ||
-                task.title.contains("커피") ||
                 task.title.contains("저녁식사")
     }
 
@@ -292,38 +280,171 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
-    // 스마트 휴식시간 조정 (충돌 해결용)
-    fun adjustBreakTimes() {
-        val currentTasks = _uiState.value.generatedSchedule.toMutableList()
-        val breakTasks = currentTasks.filter {
-            it.title.contains("휴식") || it.title.contains("커피")
-        }
-
-        // 휴식시간을 절반으로 줄이기
-        val adjustedTasks = currentTasks.map { task ->
-            if (breakTasks.contains(task)) {
-                val currentDuration = timeToMinutes(task.endTime) - timeToMinutes(task.startTime)
-                val newDuration = maxOf(5, currentDuration / 2) // 최소 5분
-
-                task.copy(
-                    endTime = minutesToTime(timeToMinutes(task.startTime) + newDuration),
-                    description = "${task.description} (단축됨)"
-                )
-            } else {
-                task
-            }
-        }
-
-        _uiState.update {
-            it.copy(generatedSchedule = adjustedTasks)
-        }
-    }
-
     // 에러 메시지 지우기
     fun clearError() {
         _uiState.update {
             it.copy(errorMessage = null)
         }
+    }
+
+    // 스케줄 분할 (고정 Task를 피해서 작업 분할)
+    fun splitSchedule() {
+        Log.d("SplitSchedule", "=== 스케줄 분할 시작 ===")
+        val currentTasks = _uiState.value.generatedSchedule.toMutableList()
+        val fixedTasks = getFixedTasks(currentTasks)
+
+        Log.d("SplitSchedule", "전체 Task 수: ${currentTasks.size}")
+        Log.d("SplitSchedule", "고정 Task 수: ${fixedTasks.size}")
+
+        fixedTasks.forEach { fixed ->
+            Log.d("SplitSchedule", "고정 Task: ${fixed.title} (${fixed.startTime}-${fixed.endTime})")
+        }
+
+        val splitTasks = mutableListOf<Task>()
+
+        currentTasks.forEach { task ->
+            if (isFixedTask(task)) {
+                // 고정 Task는 그대로 유지
+                splitTasks.add(task)
+                Log.d("SplitSchedule", "고정 Task 유지: ${task.title}")
+            } else {
+                // 일반 Task는 고정 Task와 충돌하는지 확인 후 분할
+                val conflictingFixed = findConflictingFixedTasks(task, fixedTasks)
+
+                Log.d(
+                    "SplitSchedule",
+                    "일반 Task 처리: ${task.title} (${task.startTime}-${task.endTime})"
+                )
+                Log.d("SplitSchedule", "충돌하는 고정 Task 수: ${conflictingFixed.size}")
+
+                if (conflictingFixed.isEmpty()) {
+                    // 충돌 없으면 그대로 추가
+                    splitTasks.add(task)
+                    Log.d("SplitSchedule", "충돌 없음 - 그대로 추가")
+                } else {
+                    // 충돌 있으면 분할해서 추가
+                    val splitResult = splitTaskAroundFixed(task, conflictingFixed)
+                    splitTasks.addAll(splitResult)
+                    Log.d("SplitSchedule", "충돌 있음 - ${splitResult.size}개로 분할됨")
+                }
+            }
+        }
+
+        Log.d("SplitSchedule", "분할 완료 - 총 ${splitTasks.size}개 Task")
+        splitTasks.forEach { task ->
+            Log.d("SplitSchedule", "최종 Task: ${task.title} (${task.startTime}-${task.endTime})")
+        }
+
+        _uiState.update {
+            it.copy(
+                generatedSchedule = splitTasks.sortedBy { task -> task.startTime },
+                errorMessage = null
+            )
+        }
+
+        Log.d("SplitSchedule", "=== 스케줄 분할 완료 ===")
+    }
+
+    // 고정 Task 목록 가져오기
+    private fun getFixedTasks(tasks: List<Task>): List<Task> {
+        return tasks.filter { isFixedTask(it) }
+    }
+
+    // 특정 Task와 충돌하는 고정 Task들 찾기
+    private fun findConflictingFixedTasks(task: Task, fixedTasks: List<Task>): List<Task> {
+        val taskStart = timeToMinutes(task.startTime)
+        val taskEnd = timeToMinutes(task.endTime)
+
+        return fixedTasks.filter { fixedTask ->
+            val fixedStart = timeToMinutes(fixedTask.startTime)
+            val fixedEnd = timeToMinutes(fixedTask.endTime)
+
+            // 시간 겹침 확인: (task 시작 < fixed 종료) && (task 종료 > fixed 시작)
+            taskStart < fixedEnd && taskEnd > fixedStart
+        }
+    }
+
+    // Task를 고정 Task 주변으로 분할 (개선된 버전)
+    private fun splitTaskAroundFixed(task: Task, conflictingFixed: List<Task>): List<Task> {
+        val result = mutableListOf<Task>()
+        val taskStart = timeToMinutes(task.startTime)
+        val taskEnd = timeToMinutes(task.endTime)
+
+        // 디버깅 로그
+        Log.d("SplitTask", "=== 분할 시작 ===")
+        Log.d("SplitTask", "원본 Task: ${task.title} (${task.startTime}-${task.endTime})")
+        Log.d("SplitTask", "taskStart: $taskStart, taskEnd: $taskEnd")
+
+        // 고정 Task들을 시간순으로 정렬
+        val sortedFixed = conflictingFixed.sortedBy { timeToMinutes(it.startTime) }
+        Log.d("SplitTask", "충돌하는 고정 Task 수: ${sortedFixed.size}")
+
+        sortedFixed.forEach { fixed ->
+            Log.d("SplitTask", "고정 Task: ${fixed.title} (${fixed.startTime}-${fixed.endTime})")
+        }
+
+        // 분할할 시간 구간들을 계산
+        val timeSlots = mutableListOf<Pair<Int, Int>>() // (시작, 종료) 구간들
+        var currentStart = taskStart
+        var partIndex = 1
+
+        // 각 고정 Task 사이의 빈 구간들을 찾기
+        sortedFixed.forEach { fixedTask ->
+            val fixedStart = timeToMinutes(fixedTask.startTime)
+            val fixedEnd = timeToMinutes(fixedTask.endTime)
+
+            Log.d("SplitTask", "고정 Task 처리: ${fixedTask.title} ($fixedStart-$fixedEnd)")
+            Log.d("SplitTask", "현재 처리점: $currentStart")
+
+            // 고정 Task 이전에 빈 구간이 있는지 확인
+            if (currentStart < fixedStart) {
+                val slotEnd = minOf(fixedStart, taskEnd)
+                if (slotEnd > currentStart) {
+                    timeSlots.add(Pair(currentStart, slotEnd))
+                    Log.d("SplitTask", "구간 추가: $currentStart-$slotEnd")
+                }
+            }
+
+            // 다음 구간의 시작점을 고정 Task 종료 후로 설정
+            currentStart = maxOf(currentStart, fixedEnd)
+            Log.d("SplitTask", "다음 시작점: $currentStart")
+        }
+
+        // 마지막 구간 확인
+        if (currentStart < taskEnd) {
+            timeSlots.add(Pair(currentStart, taskEnd))
+            Log.d("SplitTask", "마지막 구간 추가: $currentStart-$taskEnd")
+        }
+
+        Log.d("SplitTask", "총 ${timeSlots.size}개 구간 생성")
+
+        // 각 구간을 Task로 변환
+        timeSlots.forEachIndexed { index, (start, end) ->
+            val partTitle = if (timeSlots.size > 1) {
+                "${task.title} (${index + 1}부)"
+            } else {
+                task.title
+            }
+
+            val partTask = task.copy(
+                id = "${task.id}_part${index + 1}",
+                title = partTitle,
+                startTime = minutesToTime(start),
+                endTime = minutesToTime(end),
+                description = if (timeSlots.size > 1) "${task.description} (분할됨)" else task.description
+            )
+
+            result.add(partTask)
+            Log.d(
+                "SplitTask",
+                "Task 생성: ${partTask.title} (${partTask.startTime}-${partTask.endTime})"
+            )
+        }
+
+        Log.d("SplitTask", "최종 분할 결과: ${result.size}개 부분")
+        Log.d("SplitTask", "=== 분할 완료 ===")
+
+        return result
     }
 
     // 시간 재계산 함수
@@ -420,9 +541,7 @@ class ScheduleViewModel @Inject constructor(
                     tasks = _uiState.value.tasks,
                     date = getTodayDateString(),
                     startTime = _uiState.value.startTime,
-                    endTime = _uiState.value.endTime,
-                    includeBreaks = _uiState.value.includeBreaks, // 휴식시간 옵션 전달
-                    breakDuration = _uiState.value.breakDuration // 휴식시간 길이 전달
+                    endTime = _uiState.value.endTime
                 )
 
                 _uiState.value = _uiState.value.copy(

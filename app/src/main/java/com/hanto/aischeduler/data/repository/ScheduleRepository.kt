@@ -19,24 +19,20 @@ class ScheduleRepository @Inject constructor(
         tasks: List<String>,
         date: String,
         startTime: String = "09:00",
-        endTime: String = "18:00",
-        includeBreaks: Boolean = false, // 휴식시간 포함 여부 추가
-        breakDuration: Int = 15 // 휴식시간 길이 추가
+        endTime: String = "18:00"
     ): List<Task> {
         try {
             val prompt = createSchedulePrompt(
                 tasks = tasks,
                 date = date,
                 startTime = startTime,
-                endTime = endTime,
-                includeBreaks = includeBreaks,
-                breakDuration = breakDuration
+                endTime = endTime
             )
             val request = GroqRequest(
                 messages = listOf(
                     GroqMessage(
                         role = "system",
-                        content = getSystemPrompt(startTime, endTime, includeBreaks, breakDuration)
+                        content = getSystemPrompt(startTime, endTime)
                     ),
                     GroqMessage(
                         role = "user",
@@ -55,12 +51,12 @@ class ScheduleRepository @Inject constructor(
                 Log.d("ScheduleRepository", "AI Response: $scheduleText")
 
                 return if (scheduleText.isNullOrBlank()) {
-                    createDefaultSchedule(tasks, date, startTime, endTime, includeBreaks, breakDuration)
+                    createDefaultSchedule(tasks, date, startTime, endTime)
                 } else {
                     val parsedTasks = parseScheduleResponse(scheduleText, date)
                     parsedTasks.ifEmpty {
                         Log.d("ScheduleRepository", "Parsing failed, creating default schedule")
-                        createDefaultSchedule(tasks, date, startTime, endTime, includeBreaks, breakDuration)
+                        createDefaultSchedule(tasks, date, startTime, endTime)
                     }
                 }
             } else {
@@ -69,19 +65,17 @@ class ScheduleRepository @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e("ScheduleRepository", "Error: ${e.message}")
-            return createDefaultSchedule(tasks, date, startTime, endTime, includeBreaks, breakDuration)
+            return createDefaultSchedule(tasks, date, startTime, endTime)
         }
     }
 
-    // 기본 스케줄 생성 - 휴식시간 옵션 반영
+    // 기본 스케줄 생성
     @SuppressLint("DefaultLocale")
     private fun createDefaultSchedule(
         tasks: List<String>,
         date: String,
         startTime: String,
-        endTime: String,
-        includeBreaks: Boolean,
-        breakDuration: Int
+        endTime: String
     ): List<Task> {
         val scheduleList = mutableListOf<Task>()
 
@@ -137,16 +131,6 @@ class ScheduleRepository @Inject constructor(
                     date = date
                 )
             )
-
-            // 휴식시간 추가 (사용자가 선택한 경우에만)
-            if (includeBreaks && index < tasks.size - 1) {
-                addRestTime(scheduleList, date, currentHour, currentMinute, breakDuration)
-
-                // 휴식 시간만큼 현재 시간 증가
-                currentMinute += breakDuration
-                currentHour += currentMinute / 60
-                currentMinute %= 60
-            }
         }
 
         // 특별 이벤트 추가 (시간대별)
@@ -163,35 +147,6 @@ class ScheduleRepository @Inject constructor(
             task.contains("공부", ignoreCase = true) -> "집중해서 학습해보세요"
             else -> "AI가 추천한 시간"
         }
-    }
-
-    // 휴식시간 추가 (사용자 설정 반영)
-    @SuppressLint("DefaultLocale")
-    private fun addRestTime(
-        scheduleList: MutableList<Task>,
-        date: String,
-        hour: Int,
-        minute: Int,
-        breakDuration: Int
-    ) {
-        val restStartTime = String.format("%02d:%02d", hour, minute)
-
-        var restEndMinute = minute + breakDuration
-        val restEndHour = hour + restEndMinute / 60
-        restEndMinute %= 60
-
-        val restEndTime = String.format("%02d:%02d", restEndHour, restEndMinute)
-
-        scheduleList.add(
-            Task(
-                id = "${date}_rest_${scheduleList.size}",
-                title = if (breakDuration <= 15) "간단한 휴식" else "커피 타임",
-                description = "재충전 시간 - ${breakDuration}분",
-                startTime = restStartTime,
-                endTime = restEndTime,
-                date = date
-            )
-        )
     }
 
     // 특별 이벤트 추가 (식사시간 등)
@@ -235,136 +190,143 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    // 시스템 프롬프트 - 휴식시간 옵션 반영
+    // 시스템 프롬프트
     private fun getSystemPrompt(
         startTime: String,
-        endTime: String,
-        includeBreaks: Boolean,
-        breakDuration: Int
+        endTime: String
     ): String {
         val hour = startTime.split(":")[0].toInt()
         val timeContext = when {
-            hour >= 19 -> "저녁 시간대로 가벼운 활동과 휴식 위주로 배치해주세요."
-            hour >= 12 -> "오후 시간대로 집중력이 필요한 작업을 적절히 배치해주세요."
-            hour >= 6 -> "아침 시간대로 중요한 업무를 앞쪽에 배치해주세요."
-            else -> "심야 시간대로 가벼운 활동만 포함해주세요."
-        }
-
-        val breakInstruction = if (includeBreaks) {
-            "각 작업 사이에 ${breakDuration}분의 휴식시간을 포함해주세요."
-        } else {
-            "휴식시간 없이 연속적으로 작업을 배치해주세요."
+            hour >= 19 -> "저녁: 에너지가 떨어질 가능성이 크니, 집중도가 낮은 작업과 가벼운 활동 위주로 배치"
+            hour >= 12 -> "오후: 집중력이 점차 떨어지므로, 중요한 업무와 단순 업무를 균형 있게 배치"
+            hour >= 6 -> "아침: 집중력과 에너지가 가장 높으니, 중요·고난이도 업무를 먼저 배치"
+            else -> "심야: 체력 소모가 큰 작업은 피하고, 짧고 가벼운 활동만 포함"
         }
 
         return """
-당신은 효율적인 일정 관리 전문가입니다.
-현재 시간대: $startTime ~ $endTime
+당신은 '전문 일정 설계 AI'입니다.
+현재 시간 범위: $startTime ~ $endTime
 시간대 특성: $timeContext
-휴식시간 설정: $breakInstruction
 
-다음 규칙에 따라 시간대별 스케줄을 생성해주세요:
-1. 반드시 "$startTime" 이후부터 시작
-2. "$endTime" 이전에 모든 일정 완료
-3. 반드시 "HH:MM-HH:MM: 작업명" 형식으로 응답
-4. 각 작업은 30분~2시간 사이로 배치
-5. 휴식시간 설정에 따라 조정
-        """.trimIndent()
+목표:
+- 주어진 작업을 효율적으로 배치하여 생산성 향상
+- 중요한 작업은 피로가 누적되기 전 시간대에 우선 배치
+- 단순·반복 작업은 집중력이 낮은 시간대에 배치
+
+제약 조건:
+1. 모든 일정은 "$startTime" 이후 시작, "$endTime" 이전 종료
+2. 각 작업은 60분~2시간 사이
+3. **모든 작업은 빠짐 없이 시간 안에 배치** (작업 시간 단축 또는 병합)
+4. 출력 형식: "HH:MM-HH:MM: 작업명"
+5. 작업 분할 및 중복 배치 금지
+6. 임의로 휴식 배치 금지
+
+출력 예시:
+08:00-09:30: 보고서 초안 작성
+09:30-10:20: 이메일 확인 및 회신
+...
+"""
     }
 
-    // 프롬프트 생성 - 휴식시간 옵션 반영
+
     private fun createSchedulePrompt(
         tasks: List<String>,
         date: String,
         startTime: String,
-        endTime: String,
-        includeBreaks: Boolean,
-        breakDuration: Int
+        endTime: String
     ): String {
         val tasksText = tasks.joinToString("\n") { "- $it" }
-        val hour = startTime.split(":")[0].toInt()
-
-        val timeAdvice = when {
-            hour >= 19 -> "저녁 시간이므로 무리하지 말고 편안한 페이스로 진행하세요."
-            hour >= 12 -> "오후 시간이므로 적당한 휴식을 포함해주세요."
-            hour < 9 -> "이른 시간이므로 가벼운 활동으로 시작하세요."
-            else -> "집중할 수 있는 시간대입니다."
-        }
-
-        val breakInfo = if (includeBreaks) {
-            "휴식시간: 각 작업 사이에 ${breakDuration}분씩 포함"
-        } else {
-            "휴식시간: 없음 (연속 작업)"
-        }
 
         return """
-오늘 날짜: $date
+날짜: $date
 시간 범위: $startTime ~ $endTime
-$breakInfo
-조언: $timeAdvice
 
-해야 할 일:
+할 일 목록:
 $tasksText
 
-위 할 일들을 ${startTime}부터 $endTime 사이에 효율적으로 배치해서
-반드시 다음 형식으로 여러 줄에 걸쳐 답변해주세요:
+중요: 반드시 위에 나열된 작업들만 스케줄에 포함하고, 추가 작업을 임의로 생성하지 마세요.
 
-$startTime-XX:XX: 첫 번째 작업
-${if (includeBreaks) "XX:XX-XX:XX: 휴식\nXX:XX-XX:XX: 두 번째 작업" else "XX:XX-XX:XX: 두 번째 작업"}
+구성 원칙:
+- **모든 작업은 빠짐 없이 시간 안에 배치** (작업 시간 단축)
+- 각 시간 구간은 시작과 종료 시간이 명확해야 함
+- 작업 분할 및 중복 배치 금지
+- 임의로 휴식 배치 금지
 
-주의사항:
-- 반드시 $startTime 부터 시작
-- $endTime 전에 완료
-- 각 작업은 최소 30분, 최대 2시간
-- ${if (includeBreaks) "휴식시간 ${breakDuration}분 포함" else "휴식시간 없음"}
-        """.trimIndent()
+출력 형식:
+HH:MM-HH:MM: [정확한 작업명]
+"""
     }
+
 
     private fun parseScheduleResponse(response: String, date: String): List<Task> {
         val tasks = mutableListOf<Task>()
         Log.d("ScheduleRepository", "Parsing response: $response")
 
-        val lines = response.split("\n").filter {
-            it.contains(":") && it.contains("-") && it.trim().isNotEmpty()
+        // 줄바꿈과 콤마 둘 다 처리
+        val allLines = response.split("\n")
+        val scheduleItems = mutableListOf<String>()
+
+        // 각 줄을 콤마로 다시 분리
+        allLines.forEach { line ->
+            if (line.trim().isNotEmpty()) {
+                scheduleItems.addAll(line.split(","))
+            }
         }
 
-        Log.d("ScheduleRepository", "Filtered lines: $lines")
+        // 시간 패턴이 있는 항목만 필터링 (정규식 개선)
+        val validItems = scheduleItems.filter { item ->
+            val trimmedItem = item.trim()
+            val cleanItem = trimmedItem.replace("*", "").trim()
+            cleanItem.matches(Regex(".*\\d{1,2}:\\d{2}-\\d{1,2}:\\d{2}:.*"))
+        }
 
-        for ((index, line) in lines.withIndex()) {
+        Log.d("ScheduleRepository", "Valid schedule items: $validItems")
+
+        for ((index, item) in validItems.withIndex()) {
             try {
-                val parts = line.split(":", limit = 2)
-                if (parts.size == 2) {
-                    val timePart = parts[0].trim()
-                    val taskName = parts[1].trim()
+                val trimmedItem = item.trim().replace("*", "").trim() // ** 제거
 
-                    Log.d("ScheduleRepository", "Parsing line: timePart='$timePart', taskName='$taskName'")
+                // 정규식으로 시간 패턴 추출: HH:MM-HH:MM: 작업명
+                val timePattern = Regex("(\\d{1,2}:\\d{2})-(\\d{1,2}:\\d{2}):\\s*(.+)")
+                val matchResult = timePattern.find(trimmedItem)
 
-                    if (timePart.contains("-") && taskName.isNotEmpty()) {
-                        val times = timePart.split("-")
-                        if (times.size == 2) {
-                            val startTime = times[0].trim()
-                            val endTime = times[1].trim()
+                if (matchResult != null) {
+                    val startTime = matchResult.groupValues[1]
+                    val endTime = matchResult.groupValues[2]
+                    val fullTaskName = matchResult.groupValues[3].trim()
 
-                            tasks.add(
-                                Task(
-                                    id = "${date}_${index}",
-                                    title = taskName,
-                                    description = "AI가 생성한 일정",
-                                    startTime = startTime,
-                                    endTime = endTime,
-                                    date = date
-                                )
-                            )
-                            Log.d("ScheduleRepository", "Added task: $startTime-$endTime: $taskName")
-                        }
-                    }
+                    // 번호와 괄호 안의 추가 정보 제거하고 작업명만 추출
+                    var taskName = fullTaskName
+
+                    // "1. " "2. " 등 번호 제거
+                    taskName = taskName.replace(Regex("^\\d+\\.\\s*"), "")
+
+                    // 괄호 안의 정보 제거
+                    taskName = taskName.split("(")[0].trim()
+
+                    Log.d("ScheduleRepository", "파싱 성공: $startTime-$endTime, 작업: $taskName")
+
+                    tasks.add(
+                        Task(
+                            id = "${date}_${index}",
+                            title = taskName,
+                            description = "AI가 생성한 일정",
+                            startTime = startTime,
+                            endTime = endTime,
+                            date = date
+                        )
+                    )
+                    Log.d("ScheduleRepository", "Task 추가: $startTime-$endTime: $taskName")
+                } else {
+                    Log.d("ScheduleRepository", "시간 패턴 매칭 실패: $trimmedItem")
                 }
             } catch (e: Exception) {
-                Log.e("ScheduleRepository", "Error parsing line '$line': ${e.message}")
+                Log.e("ScheduleRepository", "Error parsing item '$item': ${e.message}")
                 continue
             }
         }
 
-        Log.d("ScheduleRepository", "Parsed ${tasks.size} tasks")
+        Log.d("ScheduleRepository", "최종 파싱 결과: ${tasks.size}개 tasks")
         return tasks
     }
 }
