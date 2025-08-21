@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -25,11 +23,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.hanto.aischeduler.ui.components.AIGenerateButton
+import com.hanto.aischeduler.ui.components.ErrorDisplay
+import com.hanto.aischeduler.ui.components.ErrorType
+import com.hanto.aischeduler.ui.components.LoadingIndicator
 import com.hanto.aischeduler.ui.components.SolidBackground
 import com.hanto.aischeduler.ui.components.TaskInputCard
 import com.hanto.aischeduler.ui.components.TaskListCard
 import com.hanto.aischeduler.ui.components.TimeSettingCard
-import com.hanto.aischeduler.ui.theme.AppColors
 import com.hanto.aischeduler.ui.viewModel.ScheduleViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,7 +40,7 @@ import java.util.Locale
 fun MainScreen(
     viewModel: ScheduleViewModel = hiltViewModel()
 ) {
-    // ViewModel 상태 구독
+
     val uiState by viewModel.uiState.collectAsState()
     var newTask by remember { mutableStateOf("") }
 
@@ -162,36 +162,37 @@ fun MainScreen(
                         .weight(0.1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // 에러 메시지
-                    uiState.errorMessage?.let { error ->
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = AppColors.Warning.copy(alpha = 0.1f)
-                        ) {
-                            Text(
-                                text = "⚠️ $error",
-                                modifier = Modifier.padding(12.dp),
-                                color = AppColors.Warning,
-                                fontSize = 14.sp
-                            )
-                        }
+                    // 로딩 상태
+                    if (uiState.isLoading) {
+                        LoadingIndicator(
+                            message = "AI가 최적의 스케줄을 만들고 있어요..."
+                        )
                     }
 
-                    // 할 일이 없을 때 안내
-                    if (uiState.tasks.isEmpty() && !uiState.isLoading) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = AppColors.Warning.copy(alpha = 0.1f)
-                        ) {
-                            Text(
-                                text = "⚠️ 할 일을 하나 이상 추가해주세요",
-                                modifier = Modifier.padding(12.dp),
-                                color = AppColors.Warning,
-                                fontSize = 14.sp
-                            )
+                    // 에러 메시지
+                    uiState.errorMessage?.let { error ->
+                        val errorType = when {
+                            error.contains("인터넷") || error.contains("네트워크") -> ErrorType.WARNING
+                            error.contains("API") || error.contains("서버") -> ErrorType.ERROR
+                            else -> ErrorType.INFO
                         }
+
+                        ErrorDisplay(
+                            message = error,
+                            type = errorType,
+                            onDismiss = { viewModel.clearError() },
+                            onRetry = if (errorType != ErrorType.INFO) {
+                                { viewModel.generateSchedule() }
+                            } else null
+                        )
+                    }
+
+                    // 안내 메시지
+                    if (uiState.tasks.isEmpty() && !uiState.isLoading && uiState.errorMessage == null) {
+                        ErrorDisplay(
+                            message = "할 일을 추가하고 AI 스케줄을 생성해보세요!",
+                            type = ErrorType.INFO
+                        )
                     }
                 }
             }
