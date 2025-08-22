@@ -71,6 +71,9 @@ fun MainScreen(
             },
             onSetAlarm = {
                 // TODO: 알림 설정 기능
+            },
+            onTaskCompletionToggle = { taskId, isCompleted ->
+                viewModel.updateTaskCompletion(taskId, isCompleted)
             }
         )
         return

@@ -1,6 +1,7 @@
 package com.hanto.aischeduler.ui.screen
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,11 +42,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hanto.aischeduler.data.model.Task
 import com.hanto.aischeduler.ui.components.AppCard
-import com.hanto.aischeduler.ui.components.DraggableScheduleTaskCard
+import com.hanto.aischeduler.ui.components.ScheduleTaskCard
 import com.hanto.aischeduler.ui.components.SolidBackground
 import com.hanto.aischeduler.ui.components.TimeConflictDialog
 import com.hanto.aischeduler.ui.theme.AppColors
@@ -60,11 +62,12 @@ fun ScheduleResultScreen(
     onToggleEditMode: () -> Unit,
     onReorderTasks: (Int, Int) -> Unit,
     onUpdateTaskTime: (String, String, String) -> Unit,
-    onSplitSchedule: () -> Unit, // 압축 대신 분할로 변경
+    onSplitSchedule: () -> Unit,
     onExtendEndTime: () -> Unit,
     onClearError: () -> Unit,
     onSave: () -> Unit = {},
     onSetAlarm: () -> Unit = {},
+    onTaskCompletionToggle: (String, Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var draggedTaskIndex by remember { mutableIntStateOf(-1) }
@@ -185,7 +188,8 @@ fun ScheduleResultScreen(
                 item {
                     ScheduleStatsCard(
                         taskCount = tasks.size,
-                        totalHours = calculateTotalHours(tasks)
+                        totalHours = calculateTotalHours(tasks),
+                        completedTasks = tasks.count { it.isCompleted }
                     )
                 }
 
@@ -194,16 +198,14 @@ fun ScheduleResultScreen(
                     items = tasks,
                     key = { _, task -> task.id }
                 ) { index, task ->
-                    DraggableScheduleTaskCard(
+                    ScheduleTaskCard(
                         task = task,
                         isEditMode = isEditMode,
-                        isDragging = draggedTaskIndex == index,
+                        onCompletionToggle = { isCompleted ->
+                            onTaskCompletionToggle(task.id, isCompleted)
+                        },
                         onTimeEdit = { startTime, endTime ->
                             onUpdateTaskTime(task.id, startTime, endTime)
-                        },
-                        onConflictDetected = { message ->
-                            conflictMessage = message
-                            showConflictDialog = true
                         },
                         modifier = Modifier.animateItemPlacement()
                     )
@@ -278,73 +280,168 @@ fun ScheduleResultScreen(
 @Composable
 private fun ScheduleStatsCard(
     taskCount: Int,
-    totalHours: Float
+    totalHours: Float,
+    completedTasks: Int = 0
 ) {
-    AppCard {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column {
-                Text(
-                    text = "🎯 오늘의 일정",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AppColors.OnSurface
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "총 ${taskCount}개 작업 • ${formatTotalHours(totalHours)}",
-                    fontSize = 14.sp,
-                    color = AppColors.TextSecondary
-                )
-            }
+    val completionRate = if (taskCount > 0) completedTasks.toFloat() / taskCount else 0f
+    val completionPercent = (completionRate * 100).toInt()
 
-            // 효율성 지표
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = when {
-                    totalHours <= 4 -> AppColors.Primary.copy(alpha = 0.1f)
-                    totalHours <= 8 -> AppColors.Secondary.copy(alpha = 0.1f)
-                    else -> AppColors.Warning.copy(alpha = 0.1f)
-                },
-                modifier = Modifier.size(60.dp)
+    AppCard {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 제목과 기본 정보
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    contentAlignment = Alignment.Center
+                Column {
+                    Text(
+                        text = "🎯 오늘의 일정",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppColors.OnSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "총 ${taskCount}개 작업 • ${formatTotalHours(totalHours)}",
+                        fontSize = 14.sp,
+                        color = AppColors.TextSecondary
+                    )
+                }
+
+                // 완료율 원형 표시
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = when {
+                        completionPercent == 100 -> AppColors.Primary.copy(alpha = 0.1f)
+                        completionPercent >= 50 -> AppColors.Secondary.copy(alpha = 0.1f)
+                        else -> AppColors.Warning.copy(alpha = 0.1f)
+                    },
+                    modifier = Modifier.size(60.dp)
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = when {
-                                totalHours <= 4 -> "⚡"
-                                totalHours <= 8 -> "💪"
-                                else -> "🔥"
-                            },
-                            fontSize = 16.sp
-                        )
-                        Text(
-                            text = when {
-                                totalHours <= 4 -> "가벼움"
-                                totalHours <= 8 -> "적당함"
-                                else -> "빡빡함"
-                            },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = when {
-                                totalHours <= 4 -> AppColors.Primary
-                                totalHours <= 8 -> AppColors.Secondary
-                                else -> AppColors.Warning
-                            }
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = when {
+                                    completionPercent == 100 -> "🎉"
+                                    completionPercent >= 75 -> "🔥"
+                                    completionPercent >= 50 -> "💪"
+                                    completionPercent >= 25 -> "⚡"
+                                    else -> "🚀"
+                                },
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "${completionPercent}%",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    completionPercent == 100 -> AppColors.Primary
+                                    completionPercent >= 50 -> AppColors.Secondary
+                                    else -> AppColors.Warning
+                                }
+                            )
+                        }
                     }
                 }
+            }
+
+            // 진행률 바
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "진행률",
+                        fontSize = 12.sp,
+                        color = AppColors.TextSecondary
+                    )
+                    Text(
+                        text = "${completedTasks}/${taskCount} 완료",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AppColors.OnSurface
+                    )
+                }
+
+                // 진행률 바
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .background(
+                            color = AppColors.Border,
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(completionRate)
+                            .height(8.dp)
+                            .background(
+                                color = when {
+                                    completionPercent == 100 -> AppColors.Primary
+                                    completionPercent >= 50 -> AppColors.Secondary
+                                    else -> AppColors.Warning
+                                },
+                                shape = RoundedCornerShape(4.dp)
+                            )
+                    )
+                }
+            }
+
+            // 격려 메시지
+            Surface(
+                modifier = Modifier.fillMaxWidth(), // 👈 가로 match_parent
+                shape = RoundedCornerShape(8.dp),
+                color = AppColors.Primary.copy(alpha = 0.1f)
+            ) {
+                Text(
+                    text = when {
+                        completionPercent == 100 -> "🎉 모든 작업을 완료했어요! 수고하셨습니다!"
+                        completionPercent >= 75 -> "🔥 거의 다 왔어요! 조금만 더 힘내세요!"
+                        completionPercent >= 50 -> "💪 절반을 넘었어요! 좋은 페이스예요!"
+                        completionPercent > 0 -> "⚡ 좋은 시작이에요! 계속 진행해보세요!"
+                        else -> getMotivationalQuote()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    fontSize = 12.sp,
+                    color = AppColors.Primary,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }
 }
+
+private fun getMotivationalQuote(): String {
+    val quotes = listOf(
+        "우리가 반복해서 하는 것이 바로 우리 자신을 만든다. 탁월함은 행동이 아니라 습관이다. - 아리스토텔레스",
+        "나 자신을 아는 것이 모든 지혜의 시작이다. - 소크라테스",
+        "삶은 스스로를 찾는 것이 아니라 스스로를 창조하는 것이다. - 조지 버나드 쇼",
+        "위대한 일을 하려면 열정을 가져야 한다. - 헤겔",
+        "네가 세상에서 보고 싶은 변화가 되어라. - 간디",
+        "길이 있지 않다면 스스로 길을 만들라. - 랄프 왈도 에머슨",
+        "행복은 이미 만들어진 것이 아니다. 당신의 행동에서 비롯된다. - 달라이 라마",
+        "고통 없는 성장은 없다. 고통은 지혜의 씨앗이다. - 칸트",
+        "절망의 한가운데서 희망의 씨앗이 자란다. - 알베르 카뮈",
+        "자신을 이기는 것이 가장 큰 승리다. - 플라톤"
+    )
+    return quotes.random()
+}
+
 
 // 총 시간 계산 (실제 Task 시간 기반)
 private fun calculateTotalHours(tasks: List<Task>): Float {
