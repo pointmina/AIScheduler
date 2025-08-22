@@ -1,4 +1,4 @@
-package com.hanto.aischeduler.data.repository
+package com.hanto.aischeduler.domain.repository
 
 import android.annotation.SuppressLint
 import android.util.Log
@@ -9,6 +9,10 @@ import com.hanto.aischeduler.data.model.GroqMessage
 import com.hanto.aischeduler.data.model.GroqRequest
 import com.hanto.aischeduler.data.model.NetworkResult
 import com.hanto.aischeduler.data.model.Task
+import com.hanto.aischeduler.domain.entity.Schedule
+import com.hanto.aischeduler.domain.entity.ScheduleRequest
+import com.hanto.aischeduler.domain.entity.TaskCategory
+import com.hanto.aischeduler.domain.entity.TaskPriority
 import kotlinx.coroutines.delay
 import retrofit2.HttpException
 import java.io.IOException
@@ -20,6 +24,7 @@ import javax.inject.Singleton
 class ScheduleRepository @Inject constructor(
     private val groqApiService: GroqApiService
 ) {
+
     private val apiKey: String by lazy {
         BuildConfig.GROQ_API_KEY.takeIf { it.isNotEmpty() }
             ?: throw IllegalStateException("GROQ_API_KEY not configured in local.properties")
@@ -33,9 +38,26 @@ class ScheduleRepository @Inject constructor(
         private const val RETRY_DELAY = 1000L
     }
 
-    /**
-     * 스케줄 생성 (NetworkResult 반환)
-     */
+    suspend fun generateSchedule(request: ScheduleRequest): NetworkResult<Schedule> {
+        val dataTasksResult = generateSchedule(
+            tasks = request.tasks,
+            date = request.date,
+            startTime = request.timeRange.startTime,
+            endTime = request.timeRange.endTime
+        )
+
+        return when (dataTasksResult) {
+            is NetworkResult.Success -> {
+                val schedule = convertToScheduleEntity(dataTasksResult.data, request)
+                NetworkResult.Success(schedule)
+            }
+
+            is NetworkResult.Error -> NetworkResult.Error(dataTasksResult.exception)
+            is NetworkResult.Loading -> NetworkResult.Loading()
+        }
+    }
+
+    // 기존 메서드 (List<String> -> List<Task>)
     suspend fun generateSchedule(
         tasks: List<String>,
         date: String,
@@ -43,16 +65,11 @@ class ScheduleRepository @Inject constructor(
         endTime: String = "18:00"
     ): NetworkResult<List<Task>> {
         return try {
-            // 입력 검증
             validateInput(tasks, startTime, endTime)
-
-            // 재시도 로직과 함께 스케줄 생성
             val result = executeWithRetry {
                 generateScheduleInternal(tasks, date, startTime, endTime)
             }
-
             NetworkResult.Success(result)
-
         } catch (e: AppException) {
             Log.e(TAG, "App exception: ${e.message}", e)
             NetworkResult.Error(e)
@@ -63,14 +80,70 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    /**
-     * 재시도 로직
-     */
-    private suspend fun <T> executeWithRetry(
-        operation: suspend () -> T
-    ): T {
-        var lastException: Exception? = null
+    private fun convertToScheduleEntity(dataTasks: List<Task>, request: ScheduleRequest): Schedule {
+        val domainTasks = dataTasks.map { dataTask ->
+            com.hanto.aischeduler.domain.entity.Task(
+                id = dataTask.id,
+                title = dataTask.title,
+                description = dataTask.description,
+                startTime = dataTask.startTime,
+                endTime = dataTask.endTime,
+                date = dataTask.date,
+                isCompleted = dataTask.isCompleted,
+                priority = mapPriority(dataTask.title),
+                category = mapCategory(dataTask.title)
+            )
+        }
 
+        return Schedule(
+            id = "schedule_${request.date}_${System.currentTimeMillis()}",
+            date = request.date,
+            tasks = domainTasks,
+            timeRange = request.timeRange
+        )
+    }
+
+    private fun mapPriority(title: String): TaskPriority {
+        return when {
+            title.contains("중요", ignoreCase = true) ||
+                    title.contains("urgent", ignoreCase = true) ||
+                    title.contains("긴급", ignoreCase = true) -> TaskPriority.URGENT
+
+            title.contains("회의", ignoreCase = true) ||
+                    title.contains("미팅", ignoreCase = true) ||
+                    title.contains("발표", ignoreCase = true) -> TaskPriority.HIGH
+
+            title.contains("검토", ignoreCase = true) ||
+                    title.contains("확인", ignoreCase = true) -> TaskPriority.LOW
+
+            else -> TaskPriority.NORMAL
+        }
+    }
+
+    private fun mapCategory(title: String): TaskCategory {
+        return when {
+            title.contains("운동", ignoreCase = true) ||
+                    title.contains("헬스", ignoreCase = true) ||
+                    title.contains("요가", ignoreCase = true) -> TaskCategory.HEALTH
+
+            title.contains("회의", ignoreCase = true) ||
+                    title.contains("업무", ignoreCase = true) ||
+                    title.contains("프로젝트", ignoreCase = true) -> TaskCategory.WORK
+
+            title.contains("공부", ignoreCase = true) ||
+                    title.contains("학습", ignoreCase = true) ||
+                    title.contains("독서", ignoreCase = true) -> TaskCategory.LEARNING
+
+            title.contains("쇼핑", ignoreCase = true) ||
+                    title.contains("청소", ignoreCase = true) ||
+                    title.contains("개인", ignoreCase = true) -> TaskCategory.PERSONAL
+
+            else -> TaskCategory.GENERAL
+        }
+    }
+
+    private suspend fun <T> executeWithRetry(operation: suspend () -> T): T {
+        var lastException: Exception? = null
         repeat(RETRY_COUNT) { attempt ->
             try {
                 Log.d(TAG, "Attempting operation (${attempt + 1}/$RETRY_COUNT)")
@@ -78,8 +151,6 @@ class ScheduleRepository @Inject constructor(
             } catch (e: Exception) {
                 lastException = e
                 Log.w(TAG, "Attempt ${attempt + 1} failed: ${e.message}")
-
-                // 마지막 시도가 아니면 대기 후 재시도
                 if (attempt < RETRY_COUNT - 1) {
                     val delayMs = RETRY_DELAY * (attempt + 1)
                     Log.d(TAG, "Retrying in ${delayMs}ms...")
@@ -87,19 +158,10 @@ class ScheduleRepository @Inject constructor(
                 }
             }
         }
-
-        // 모든 재시도 실패
         throw lastException ?: AppException.NetworkException("모든 재시도가 실패했습니다")
     }
 
-    /**
-     * 입력 검증 (강화된 버전)
-     */
-    private fun validateInput(
-        tasks: List<String>,
-        startTime: String,
-        endTime: String
-    ) {
+    private fun validateInput(tasks: List<String>, startTime: String, endTime: String) {
         when {
             tasks.isEmpty() ->
                 throw AppException.ValidationException("작업 목록이 비어있습니다")
@@ -127,41 +189,26 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    /**
-     * 예외 매핑
-     */
     private fun mapException(exception: Exception): AppException {
         return when (exception) {
-            is HttpException -> {
-                AppException.ApiException(
-                    code = exception.code(),
-                    message = exception.message()
-                )
-            }
+            is HttpException -> AppException.ApiException(
+                code = exception.code(),
+                message = exception.message()
+            )
 
-            is SocketTimeoutException -> {
-                AppException.TimeoutException()
-            }
+            is SocketTimeoutException -> AppException.TimeoutException()
+            is IOException -> AppException.NetworkException(
+                message = "네트워크 연결 오류",
+                cause = exception
+            )
 
-            is IOException -> {
-                AppException.NetworkException(
-                    message = "네트워크 연결 오류",
-                    cause = exception
-                )
-            }
-
-            else -> {
-                AppException.NetworkException(
-                    message = "알 수 없는 오류: ${exception.message}",
-                    cause = exception
-                )
-            }
+            else -> AppException.NetworkException(
+                message = "알 수 없는 오류: ${exception.message}",
+                cause = exception
+            )
         }
     }
 
-    /**
-     * 시간 형식 검증 (HH:MM)
-     */
     private fun isValidTimeFormat(time: String): Boolean {
         return time.matches(Regex("^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"))
     }
@@ -177,9 +224,6 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    /**
-     * 실제 스케줄 생성 로직
-     */
     private suspend fun generateScheduleInternal(
         tasks: List<String>,
         date: String,
@@ -220,9 +264,6 @@ class ScheduleRepository @Inject constructor(
         }
     }
 
-    /**
-     * 기본 스케줄 생성 (AI 실패 시 fallback)
-     */
     @SuppressLint("DefaultLocale")
     private fun createDefaultSchedule(
         tasks: List<String>,
@@ -282,44 +323,6 @@ class ScheduleRepository @Inject constructor(
         return scheduleList.sortedBy { it.startTime }
     }
 
-    private fun addSpecialEvents(
-        scheduleList: MutableList<Task>,
-        date: String,
-        startTime: String,
-        endTime: String,
-        isEveningTime: Boolean
-    ) {
-        val startHour = startTime.split(":")[0].toInt()
-        val endHour = endTime.split(":")[0].toInt()
-
-        when {
-            startHour <= 12 && endHour >= 13 && !isEveningTime -> {
-                scheduleList.add(
-                    Task(
-                        id = "${date}_lunch",
-                        title = "점심시간",
-                        startTime = "12:00",
-                        endTime = "13:00",
-                        date = date
-                    )
-                )
-            }
-
-            isEveningTime && startHour <= 18 && endHour >= 19 -> {
-                scheduleList.add(
-                    Task(
-                        id = "${date}_dinner",
-                        title = "저녁식사",
-                        description = "맛있는 저녁 드세요",
-                        startTime = "18:00",
-                        endTime = "19:00",
-                        date = date
-                    )
-                )
-            }
-        }
-    }
-
     private fun getSystemPrompt(startTime: String, endTime: String): String {
         return """
 You are a "Professional Schedule Planning AI".
@@ -374,7 +377,6 @@ Output format:
 HH:MM-HH:MM: [Exact Task Name]
 """
     }
-
 
     private fun parseScheduleResponse(response: String, date: String): List<Task> {
         val tasks = mutableListOf<Task>()

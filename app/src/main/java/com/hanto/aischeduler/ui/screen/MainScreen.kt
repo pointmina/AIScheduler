@@ -58,7 +58,7 @@ fun MainScreen(
             onUpdateTaskTime = { taskId, startTime, endTime ->
                 viewModel.updateTaskTime(taskId, startTime, endTime)
             },
-            onSplitSchedule = { viewModel.splitSchedule() }, // 압축 대신 분할로 변경
+            onSplitSchedule = { viewModel.splitSchedule() },
             onExtendEndTime = { viewModel.extendEndTime() },
             onClearError = { viewModel.clearError() },
             onSave = {
