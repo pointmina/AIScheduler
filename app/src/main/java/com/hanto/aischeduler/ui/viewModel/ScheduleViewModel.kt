@@ -3,6 +3,9 @@ package com.hanto.aischeduler.ui.viewModel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hanto.aischeduler.data.database.SavedScheduleDao
+import com.hanto.aischeduler.data.database.SavedScheduleEntity
+import com.hanto.aischeduler.data.database.SavedTaskEntity
 import com.hanto.aischeduler.data.model.AppException
 import com.hanto.aischeduler.data.model.onError
 import com.hanto.aischeduler.data.model.onSuccess
@@ -27,7 +30,8 @@ import javax.inject.Inject
 class ScheduleViewModel @Inject constructor(
     private val generateScheduleUseCase: GenerateScheduleUseCase,
     private val validateTasksUseCase: ValidateTasksUseCase,
-    private val validateTimeRangeUseCase: ValidateTimeRangeUseCase
+    private val validateTimeRangeUseCase: ValidateTimeRangeUseCase,
+    private val savedScheduleDao: SavedScheduleDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScheduleUiState())
@@ -198,7 +202,7 @@ class ScheduleViewModel @Inject constructor(
                     "시간 설정을 개선하면 더 좋은 스케줄을 만들 수 있습니다"
 
                 com.hanto.aischeduler.domain.usecase.TimeQuality.ACCEPTABLE ->
-                    "✅ 적절한 시간 설정입니다"
+                    "적절한 시간 설정입니다"
 
                 com.hanto.aischeduler.domain.usecase.TimeQuality.GOOD ->
                     "👍 좋은 시간 설정입니다"
@@ -289,5 +293,154 @@ class ScheduleViewModel @Inject constructor(
     private fun getTodayDateString(): String {
         val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         return formatter.format(Date())
+    }
+
+    /**
+     * 현재 스케줄을 데이터베이스에 저장
+     */
+    fun saveCurrentSchedule(title: String = "오늘의 계획") {
+        val currentState = _uiState.value
+
+        if (currentState.generatedSchedule.isEmpty()) {
+            _uiState.update {
+                it.copy(errorMessage = "저장할 스케줄이 없습니다")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "스케줄 저장 시작")
+
+                // 1. 스케줄 엔티티 생성
+                val scheduleId = "schedule_${System.currentTimeMillis()}"
+                val scheduleEntity = SavedScheduleEntity(
+                    id = scheduleId,
+                    title = title,
+                    date = getTodayDateString(),
+                    startTime = currentState.startTime,
+                    endTime = currentState.endTime,
+                    totalTasks = currentState.generatedSchedule.size,
+                    completedTasks = 0
+                )
+
+                // 2. 작업 엔티티들 생성
+                val taskEntities = currentState.generatedSchedule.mapIndexed { index, task ->
+                    SavedTaskEntity(
+                        id = "task_${scheduleId}_$index",
+                        scheduleId = scheduleId,
+                        title = task.title,
+                        description = task.description,
+                        startTime = task.startTime,
+                        endTime = task.endTime,
+                        isCompleted = task.isCompleted,
+                        sortOrder = index
+                    )
+                }
+
+                // 3. 데이터베이스에 저장
+                savedScheduleDao.insertSchedule(scheduleEntity)
+                savedScheduleDao.insertTasks(taskEntities)
+
+                Log.d(TAG, "스케줄 저장 성공: $scheduleId")
+
+                _uiState.update {
+                    it.copy(errorMessage = "계획이 저장되었습니다!")
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "스케줄 저장 실패", e)
+                _uiState.update {
+                    it.copy(errorMessage = "저장 중 오류가 발생했습니다: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * 저장된 오늘 스케줄 불러오기
+     */
+    fun loadTodaySchedule() {
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "오늘 스케줄 불러오기 시작")
+
+                val today = getTodayDateString()
+                val savedSchedule = savedScheduleDao.getScheduleByDate(today)
+
+                if (savedSchedule != null) {
+                    Log.d(TAG, "저장된 스케줄 발견: ${savedSchedule.schedule.title}")
+
+                    // 저장된 데이터를 UI 모델로 변환
+                    val uiTasks = savedSchedule.tasks.map { taskEntity ->
+                        com.hanto.aischeduler.data.model.Task(
+                            id = taskEntity.id,
+                            title = taskEntity.title,
+                            description = taskEntity.description,
+                            startTime = taskEntity.startTime,
+                            endTime = taskEntity.endTime,
+                            date = savedSchedule.schedule.date,
+                            isCompleted = taskEntity.isCompleted
+                        )
+                    }.sortedBy { it.startTime }
+
+                    _uiState.update {
+                        it.copy(
+                            generatedSchedule = uiTasks,
+                            isScheduleGenerated = true,
+                            startTime = savedSchedule.schedule.startTime,
+                            endTime = savedSchedule.schedule.endTime,
+                            errorMessage = "저장된 계획을 불러왔습니다"
+                        )
+                    }
+                } else {
+                    Log.d(TAG, "오늘 저장된 스케줄 없음")
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "스케줄 불러오기 실패", e)
+                _uiState.update {
+                    it.copy(errorMessage = "저장된 계획을 불러올 수 없습니다")
+                }
+            }
+        }
+    }
+
+    /**
+     * 작업 완료 상태 업데이트
+     */
+    fun updateTaskCompletion(taskId: String, isCompleted: Boolean) {
+        viewModelScope.launch {
+            try {
+                // 1. 데이터베이스 업데이트
+                savedScheduleDao.updateTaskCompletion(taskId, isCompleted)
+
+                // 2. UI 상태 업데이트
+                val updatedTasks = _uiState.value.generatedSchedule.map { task ->
+                    if (task.id == taskId) {
+                        task.copy(isCompleted = isCompleted)
+                    } else {
+                        task
+                    }
+                }
+
+                _uiState.update {
+                    it.copy(generatedSchedule = updatedTasks)
+                }
+
+                // 3. 스케줄의 완료 카운트 업데이트
+                if (taskId.contains("task_schedule_")) {
+                    val scheduleId = taskId.substringAfter("task_").substringBefore("_")
+                    if (scheduleId.isNotEmpty()) {
+                        savedScheduleDao.updateScheduleCompletionCount("schedule_$scheduleId")
+                    }
+                }
+
+                Log.d(TAG, "작업 완료 상태 업데이트: $taskId -> $isCompleted")
+
+            } catch (e: Exception) {
+                Log.e(TAG, "작업 상태 업데이트 실패", e)
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-package com.hanto.aischeduler
+package com.hanto.aischeduler.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

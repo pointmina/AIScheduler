@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +45,10 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     var newTask by remember { mutableStateOf("") }
 
+    LaunchedEffect(Unit) {
+        viewModel.loadTodaySchedule()
+    }
+
     // 스케줄이 생성되면 결과 화면으로 이동
     if (uiState.isScheduleGenerated) {
         ScheduleResultScreen(
@@ -62,7 +67,7 @@ fun MainScreen(
             onExtendEndTime = { viewModel.extendEndTime() },
             onClearError = { viewModel.clearError() },
             onSave = {
-                // TODO: 저장 기능
+                viewModel.saveCurrentSchedule("오늘의 계획")
             },
             onSetAlarm = {
                 // TODO: 알림 설정 기능
