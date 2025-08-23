@@ -50,4 +50,12 @@ interface SavedScheduleDao {
         scheduleId: String,
         timestamp: Long = System.currentTimeMillis()
     )
+
+    // === 시간 편집 관련 ===
+    @Query("UPDATE saved_tasks SET startTime = :startTime, endTime = :endTime WHERE id = :taskId")
+    suspend fun updateTaskTime(taskId: String, startTime: String, endTime: String)
+
+    @Query("UPDATE saved_schedules SET lastModified = :timestamp WHERE id = :scheduleId")
+    suspend fun updateScheduleLastModified(scheduleId: String, timestamp: Long)
+
 }

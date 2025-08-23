@@ -9,10 +9,10 @@ import com.hanto.aischeduler.data.model.GroqMessage
 import com.hanto.aischeduler.data.model.GroqRequest
 import com.hanto.aischeduler.data.model.NetworkResult
 import com.hanto.aischeduler.data.model.Task
+import com.hanto.aischeduler.data.model.TaskCategory
+import com.hanto.aischeduler.data.model.TaskPriority
 import com.hanto.aischeduler.domain.entity.Schedule
 import com.hanto.aischeduler.domain.entity.ScheduleRequest
-import com.hanto.aischeduler.domain.entity.TaskCategory
-import com.hanto.aischeduler.domain.entity.TaskPriority
 import kotlinx.coroutines.delay
 import retrofit2.HttpException
 import java.io.IOException
@@ -82,7 +82,7 @@ class ScheduleRepository @Inject constructor(
 
     private fun convertToScheduleEntity(dataTasks: List<Task>, request: ScheduleRequest): Schedule {
         val domainTasks = dataTasks.map { dataTask ->
-            com.hanto.aischeduler.domain.entity.Task(
+            Task(
                 id = dataTask.id,
                 title = dataTask.title,
                 description = dataTask.description,

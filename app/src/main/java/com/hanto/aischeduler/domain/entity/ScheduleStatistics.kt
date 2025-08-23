@@ -1,5 +1,8 @@
 package com.hanto.aischeduler.domain.entity
 
+import com.hanto.aischeduler.data.model.TaskCategory
+import com.hanto.aischeduler.data.model.TaskPriority
+
 data class ScheduleStatistics(
     val totalSchedules: Int,
     val totalTasks: Int,

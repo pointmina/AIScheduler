@@ -4,6 +4,7 @@ import android.util.Log
 import com.hanto.aischeduler.data.model.NetworkResult
 import com.hanto.aischeduler.domain.entity.Schedule
 import com.hanto.aischeduler.domain.entity.ScheduleRequest
+import com.hanto.aischeduler.domain.entity.TimeRange
 import com.hanto.aischeduler.domain.repository.ScheduleRepository
 import javax.inject.Inject
 
@@ -94,7 +95,7 @@ class GenerateScheduleUseCase @Inject constructor(
     /**
      * 시간 범위 분석 및 검증
      */
-    private fun analyzeAndValidateTimeRange(timeRange: com.hanto.aischeduler.domain.entity.TimeRange): TimeAnalysisResult {
+    private fun analyzeAndValidateTimeRange(timeRange: TimeRange): TimeAnalysisResult {
         // 기본 검증
         validateTimeRangeUseCase(timeRange)
 

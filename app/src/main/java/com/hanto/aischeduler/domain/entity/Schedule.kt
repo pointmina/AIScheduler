@@ -1,6 +1,9 @@
 package com.hanto.aischeduler.domain.entity
 
 import android.annotation.SuppressLint
+import com.hanto.aischeduler.data.model.Task
+import com.hanto.aischeduler.data.model.TaskCategory
+import com.hanto.aischeduler.data.model.TaskPriority
 
 data class Schedule(
     val id: String,

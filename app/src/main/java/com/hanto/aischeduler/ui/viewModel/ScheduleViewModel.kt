@@ -1,5 +1,6 @@
 package com.hanto.aischeduler.ui.viewModel
 
+import android.annotation.SuppressLint
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,10 +8,10 @@ import com.hanto.aischeduler.data.database.SavedScheduleDao
 import com.hanto.aischeduler.data.database.SavedScheduleEntity
 import com.hanto.aischeduler.data.database.SavedTaskEntity
 import com.hanto.aischeduler.data.model.AppException
+import com.hanto.aischeduler.data.model.Task
 import com.hanto.aischeduler.data.model.onError
 import com.hanto.aischeduler.data.model.onSuccess
 import com.hanto.aischeduler.domain.entity.ScheduleRequest
-import com.hanto.aischeduler.domain.entity.Task
 import com.hanto.aischeduler.domain.entity.TimeRange
 import com.hanto.aischeduler.domain.usecase.GenerateScheduleUseCase
 import com.hanto.aischeduler.domain.usecase.ValidateTasksUseCase
@@ -58,6 +59,68 @@ class ScheduleViewModel @Inject constructor(
         }
 
         Log.d(TAG, "작업 추가됨: $task (총 ${currentTasks.size}개)")
+    }
+
+    /**
+     * 현재 스케줄을 데이터베이스에 저장
+     */
+    fun saveCurrentSchedule(title: String = "오늘의 계획") {
+        val currentState = _uiState.value
+
+        if (currentState.generatedSchedule.isEmpty()) {
+            _uiState.update {
+                it.copy(errorMessage = "저장할 스케줄이 없습니다")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "스케줄 저장 시작")
+
+                // 1. 스케줄 엔티티 생성
+                val scheduleId = "schedule_${System.currentTimeMillis()}"
+                val scheduleEntity = SavedScheduleEntity(
+                    id = scheduleId,
+                    title = title,
+                    date = getTodayDateString(),
+                    startTime = currentState.startTime,
+                    endTime = currentState.endTime,
+                    totalTasks = currentState.generatedSchedule.size,
+                    completedTasks = 0
+                )
+
+                // 2. 작업 엔티티들 생성
+                val taskEntities = currentState.generatedSchedule.mapIndexed { index, task ->
+                    SavedTaskEntity(
+                        id = "task_${scheduleId}_$index",
+                        scheduleId = scheduleId,
+                        title = task.title,
+                        description = task.description,
+                        startTime = task.startTime,
+                        endTime = task.endTime,
+                        isCompleted = task.isCompleted,
+                        sortOrder = index
+                    )
+                }
+
+                // 3. 데이터베이스에 저장
+                savedScheduleDao.insertSchedule(scheduleEntity)
+                savedScheduleDao.insertTasks(taskEntities)
+
+                Log.d(TAG, "스케줄 저장 성공: $scheduleId")
+
+                _uiState.update {
+                    it.copy(errorMessage = "✅ 계획이 저장되었습니다!")
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "스케줄 저장 실패", e)
+                _uiState.update {
+                    it.copy(errorMessage = "저장 중 오류가 발생했습니다: ${e.message}")
+                }
+            }
+        }
     }
 
     fun removeTask(task: String) {
@@ -168,62 +231,11 @@ class ScheduleViewModel @Inject constructor(
     }
 
     /**
-     *작업 목록 미리 검증
-     */
-    fun validateTasks(tasks: List<String>): String? {
-        return try {
-            validateTasksUseCase(tasks)
-
-            // 복잡도 분석 결과도 제공
-            val analysis = validateTasksUseCase.analyzeTaskComplexity(tasks)
-            if (analysis.recommendations.isNotEmpty()) {
-                "💡 ${analysis.recommendations.first()}"
-            } else null
-
-        } catch (e: AppException) {
-            e.getUserMessage()
-        } catch (e: Exception) {
-            "작업 검증 중 오류가 발생했습니다"
-        }
-    }
-
-    /**
-     *시간 범위 미리 검증
-     */
-    fun validateTimeRange(startTime: String, endTime: String): String? {
-        return try {
-            val timeRange = TimeRange(startTime, endTime)
-            validateTimeRangeUseCase(timeRange)
-
-            // 품질 분석 결과도 제공
-            val analysis = validateTimeRangeUseCase.analyzeTimeRangeQuality(timeRange)
-            when (analysis.quality) {
-                com.hanto.aischeduler.domain.usecase.TimeQuality.POOR ->
-                    "시간 설정을 개선하면 더 좋은 스케줄을 만들 수 있습니다"
-
-                com.hanto.aischeduler.domain.usecase.TimeQuality.ACCEPTABLE ->
-                    "적절한 시간 설정입니다"
-
-                com.hanto.aischeduler.domain.usecase.TimeQuality.GOOD ->
-                    "👍 좋은 시간 설정입니다"
-
-                com.hanto.aischeduler.domain.usecase.TimeQuality.EXCELLENT ->
-                    "🌟 최적의 시간 설정입니다!"
-            }
-
-        } catch (e: AppException) {
-            e.getUserMessage()
-        } catch (e: Exception) {
-            "시간 검증 중 오류가 발생했습니다"
-        }
-    }
-
-    /**
      * Domain Task를 Data Task로 변환 (UI 호환성)
      */
-    private fun convertToDataTasks(domainTasks: List<Task>): List<com.hanto.aischeduler.data.model.Task> {
+    private fun convertToDataTasks(domainTasks: List<Task>): List<Task> {
         return domainTasks.map { domainTask ->
-            com.hanto.aischeduler.data.model.Task(
+            Task(
                 id = domainTask.id,
                 title = domainTask.title,
                 description = domainTask.description,
@@ -278,10 +290,6 @@ class ScheduleViewModel @Inject constructor(
         Log.d(TAG, "reorderTasks 기능은 향후 구현 예정")
     }
 
-    fun updateTaskTime(taskId: String, newStartTime: String, newEndTime: String) {
-        Log.d(TAG, "updateTaskTime 기능은 향후 구현 예정")
-    }
-
     fun splitSchedule() {
         Log.d(TAG, "splitSchedule 기능은 향후 구현 예정")
     }
@@ -296,66 +304,214 @@ class ScheduleViewModel @Inject constructor(
     }
 
     /**
-     * 현재 스케줄을 데이터베이스에 저장
+     * 작업의 시간을 업데이트 (편집 모드) - 충돌 감지 포함
      */
-    fun saveCurrentSchedule(title: String = "오늘의 계획") {
-        val currentState = _uiState.value
-
-        if (currentState.generatedSchedule.isEmpty()) {
-            _uiState.update {
-                it.copy(errorMessage = "저장할 스케줄이 없습니다")
-            }
-            return
-        }
-
+    fun updateTaskTime(taskId: String, newStartTime: String, newEndTime: String) {
         viewModelScope.launch {
             try {
-                Log.d(TAG, "스케줄 저장 시작")
+                Log.d(TAG, "작업 시간 업데이트 시작: $taskId ($newStartTime-$newEndTime)")
 
-                // 1. 스케줄 엔티티 생성
-                val scheduleId = "schedule_${System.currentTimeMillis()}"
-                val scheduleEntity = SavedScheduleEntity(
-                    id = scheduleId,
-                    title = title,
-                    date = getTodayDateString(),
-                    startTime = currentState.startTime,
-                    endTime = currentState.endTime,
-                    totalTasks = currentState.generatedSchedule.size,
-                    completedTasks = 0
-                )
-
-                // 2. 작업 엔티티들 생성
-                val taskEntities = currentState.generatedSchedule.mapIndexed { index, task ->
-                    SavedTaskEntity(
-                        id = "task_${scheduleId}_$index",
-                        scheduleId = scheduleId,
-                        title = task.title,
-                        description = task.description,
-                        startTime = task.startTime,
-                        endTime = task.endTime,
-                        isCompleted = task.isCompleted,
-                        sortOrder = index
-                    )
+                // 1. 시간 유효성 검증
+                if (!isValidTimeFormat(newStartTime) || !isValidTimeFormat(newEndTime)) {
+                    _uiState.update {
+                        it.copy(errorMessage = "올바르지 않은 시간 형식입니다")
+                    }
+                    return@launch
                 }
 
-                // 3. 데이터베이스에 저장
-                savedScheduleDao.insertSchedule(scheduleEntity)
-                savedScheduleDao.insertTasks(taskEntities)
+                val startMinutes = timeToMinutes(newStartTime)
+                val endMinutes = timeToMinutes(newEndTime)
 
-                Log.d(TAG, "스케줄 저장 성공: $scheduleId")
+                if (endMinutes <= startMinutes) {
+                    _uiState.update {
+                        it.copy(errorMessage = "종료 시간은 시작 시간보다 늦어야 합니다")
+                    }
+                    return@launch
+                }
 
-                _uiState.update {
-                    it.copy(errorMessage = "계획이 저장되었습니다!")
+                // 2. 다른 작업들과의 충돌 체크
+                val currentTasks = _uiState.value.generatedSchedule
+                val conflictingTasks = findConflictingTasks(
+                    currentTasks = currentTasks,
+                    editingTaskId = taskId,
+                    newStartTime = newStartTime,
+                    newEndTime = newEndTime
+                )
+
+                if (conflictingTasks.isNotEmpty()) {
+                    // 충돌 발견 - 자동 조정 시도
+                    val adjustedTasks = autoAdjustConflictingTasks(
+                        currentTasks = currentTasks,
+                        editingTaskId = taskId,
+                        newStartTime = newStartTime,
+                        newEndTime = newEndTime,
+                        conflictingTasks = conflictingTasks
+                    )
+
+                    if (adjustedTasks != null) {
+                        // 자동 조정 성공
+                        _uiState.update {
+                            it.copy(
+                                generatedSchedule = adjustedTasks,
+                                errorMessage = "⚡ 다른 작업들의 시간을 자동으로 조정했습니다"
+                            )
+                        }
+
+                        // 모든 변경된 작업들을 데이터베이스에 업데이트
+                        updateMultipleTasksInDatabase(adjustedTasks.filter {
+                            it.id == taskId || conflictingTasks.any { conflict -> conflict.id == it.id }
+                        })
+
+                    } else {
+                        // 자동 조정 실패 - 사용자에게 알림
+                        val conflictNames = conflictingTasks.joinToString(", ") { it.title }
+                        _uiState.update {
+                            it.copy(errorMessage = "⚠️ 다음 작업과 시간이 겹칩니다: $conflictNames")
+                        }
+                    }
+
+                } else {
+                    // 충돌 없음 - 정상 업데이트
+                    val updatedTasks = currentTasks.map { task ->
+                        if (task.id == taskId) {
+                            task.copy(
+                                startTime = newStartTime,
+                                endTime = newEndTime
+                            )
+                        } else {
+                            task
+                        }
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            generatedSchedule = updatedTasks,
+                            errorMessage = "⏰ 시간이 수정되었습니다"
+                        )
+                    }
+
+                    // 데이터베이스 업데이트
+                    if (taskId.startsWith("task_schedule_")) {
+                        savedScheduleDao.updateTaskTime(taskId, newStartTime, newEndTime)
+
+                        val scheduleId = extractScheduleIdFromTaskId(taskId)
+                        if (scheduleId.isNotEmpty()) {
+                            savedScheduleDao.updateScheduleLastModified(
+                                scheduleId,
+                                System.currentTimeMillis()
+                            )
+                        }
+                    }
                 }
 
             } catch (e: Exception) {
-                Log.e(TAG, "스케줄 저장 실패", e)
+                Log.e(TAG, "작업 시간 업데이트 실패", e)
                 _uiState.update {
-                    it.copy(errorMessage = "저장 중 오류가 발생했습니다: ${e.message}")
+                    it.copy(errorMessage = "시간 수정 중 오류가 발생했습니다")
                 }
             }
         }
     }
+
+    // 충돌하는 작업들 찾기
+    private fun findConflictingTasks(
+        currentTasks: List<Task>,
+        editingTaskId: String,
+        newStartTime: String,
+        newEndTime: String
+    ): List<Task> {
+        val newStartMinutes = timeToMinutes(newStartTime)
+        val newEndMinutes = timeToMinutes(newEndTime)
+
+        return currentTasks.filter { task ->
+            if (task.id == editingTaskId) return@filter false
+
+            val taskStartMinutes = timeToMinutes(task.startTime)
+            val taskEndMinutes = timeToMinutes(task.endTime)
+
+            // 시간 겹침 체크
+            newStartMinutes < taskEndMinutes && newEndMinutes > taskStartMinutes
+        }
+    }
+
+    // 충돌하는 작업들을 자동으로 조정
+    private fun autoAdjustConflictingTasks(
+        currentTasks: List<Task>,
+        editingTaskId: String,
+        newStartTime: String,
+        newEndTime: String,
+        conflictingTasks: List<Task>
+    ): List<Task>? {
+        return try {
+            val adjustedTasks = currentTasks.toMutableList()
+            val newEndMinutes = timeToMinutes(newEndTime)
+
+            // 편집 중인 작업 업데이트
+            val editingTaskIndex = adjustedTasks.indexOfFirst { it.id == editingTaskId }
+            if (editingTaskIndex >= 0) {
+                adjustedTasks[editingTaskIndex] = adjustedTasks[editingTaskIndex].copy(
+                    startTime = newStartTime,
+                    endTime = newEndTime
+                )
+            }
+
+            // 충돌하는 작업들을 편집된 작업 이후 시간으로 밀기
+            conflictingTasks.sortedBy { timeToMinutes(it.startTime) }.forEach { conflictTask ->
+                val taskIndex = adjustedTasks.indexOfFirst { it.id == conflictTask.id }
+                if (taskIndex >= 0) {
+                    val originalDuration =
+                        timeToMinutes(conflictTask.endTime) - timeToMinutes(conflictTask.startTime)
+                    val newStartTime = minutesToTime(newEndMinutes)
+                    val newEndTime = minutesToTime(newEndMinutes + originalDuration)
+
+                    adjustedTasks[taskIndex] = adjustedTasks[taskIndex].copy(
+                        startTime = newStartTime,
+                        endTime = newEndTime
+                    )
+                }
+            }
+
+            adjustedTasks.toList()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "자동 조정 실패", e)
+            null
+        }
+    }
+
+    // 분을 시간 문자열로 변환
+    @SuppressLint("DefaultLocale")
+    private fun minutesToTime(minutes: Int): String {
+        val hour = minutes / 60
+        val minute = minutes % 60
+        return String.format("%02d:%02d", hour, minute)
+    }
+
+    // 여러 작업을 데이터베이스에 업데이트
+    private suspend fun updateMultipleTasksInDatabase(tasks: List<Task>) {
+        try {
+            tasks.forEach { task ->
+                if (task.id.startsWith("task_schedule_")) {
+                    savedScheduleDao.updateTaskTime(task.id, task.startTime, task.endTime)
+                }
+            }
+
+            // 스케줄 수정 시간 업데이트
+            tasks.firstOrNull()?.let { firstTask ->
+                val scheduleId = extractScheduleIdFromTaskId(firstTask.id)
+                if (scheduleId.isNotEmpty()) {
+                    savedScheduleDao.updateScheduleLastModified(
+                        scheduleId,
+                        System.currentTimeMillis()
+                    )
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "데이터베이스 일괄 업데이트 실패", e)
+        }
+    }
+
 
     /**
      * 저장된 오늘 스케줄 불러오기
@@ -373,7 +529,7 @@ class ScheduleViewModel @Inject constructor(
 
                     // 저장된 데이터를 UI 모델로 변환
                     val uiTasks = savedSchedule.tasks.map { taskEntity ->
-                        com.hanto.aischeduler.data.model.Task(
+                        Task(
                             id = taskEntity.id,
                             title = taskEntity.title,
                             description = taskEntity.description,
@@ -443,4 +599,33 @@ class ScheduleViewModel @Inject constructor(
             }
         }
     }
+
+    private fun isValidTimeFormat(time: String): Boolean {
+        return time.matches(Regex("^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"))
+    }
+
+    private fun timeToMinutes(time: String): Int {
+        val parts = time.split(":")
+        return try {
+            val hour = parts[0].toInt()
+            val minute = parts[1].toInt()
+            hour * 60 + minute
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    private fun extractScheduleIdFromTaskId(taskId: String): String {
+        return try {
+            if (taskId.startsWith("task_schedule_")) {
+                val parts = taskId.split("_")
+                if (parts.size >= 3) {
+                    "schedule_${parts[2]}"
+                } else ""
+            } else ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
 }
