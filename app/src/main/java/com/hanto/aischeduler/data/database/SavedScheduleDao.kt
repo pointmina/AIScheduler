@@ -1,8 +1,6 @@
 package com.hanto.aischeduler.data.database
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
@@ -58,4 +56,21 @@ interface SavedScheduleDao {
     @Query("UPDATE saved_schedules SET lastModified = :timestamp WHERE id = :scheduleId")
     suspend fun updateScheduleLastModified(scheduleId: String, timestamp: Long)
 
+    // === 날짜 범위 조회 ===
+    @Transaction
+    @Query(
+        """
+    SELECT * FROM saved_schedules 
+    WHERE date BETWEEN :startDate AND :endDate 
+    ORDER BY date DESC, createdAt DESC
+"""
+    )
+    suspend fun getSchedulesByDateRange(
+        startDate: String,
+        endDate: String
+    ): List<SavedScheduleWithTasks>
+
+    // === 삭제 기능 ===
+    @Query("DELETE FROM saved_schedules WHERE id = :scheduleId")
+    suspend fun deleteScheduleById(scheduleId: String)
 }

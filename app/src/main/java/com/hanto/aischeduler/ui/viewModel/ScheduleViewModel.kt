@@ -4,15 +4,13 @@ import android.annotation.SuppressLint
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.hanto.aischeduler.data.database.SavedScheduleDao
-import com.hanto.aischeduler.data.database.SavedScheduleEntity
-import com.hanto.aischeduler.data.database.SavedTaskEntity
 import com.hanto.aischeduler.data.model.AppException
 import com.hanto.aischeduler.data.model.Task
 import com.hanto.aischeduler.data.model.onError
 import com.hanto.aischeduler.data.model.onSuccess
 import com.hanto.aischeduler.domain.entity.ScheduleRequest
 import com.hanto.aischeduler.domain.entity.TimeRange
+import com.hanto.aischeduler.domain.repository.SavedScheduleRepository
 import com.hanto.aischeduler.domain.usecase.GenerateScheduleUseCase
 import com.hanto.aischeduler.domain.usecase.ValidateTasksUseCase
 import com.hanto.aischeduler.domain.usecase.ValidateTimeRangeUseCase
@@ -23,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
@@ -32,15 +31,16 @@ class ScheduleViewModel @Inject constructor(
     private val generateScheduleUseCase: GenerateScheduleUseCase,
     private val validateTasksUseCase: ValidateTasksUseCase,
     private val validateTimeRangeUseCase: ValidateTimeRangeUseCase,
-    private val savedScheduleDao: SavedScheduleDao
+    private val savedScheduleRepository: SavedScheduleRepository
 ) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(ScheduleUiState())
-    val uiState: StateFlow<ScheduleUiState> = _uiState.asStateFlow()
 
     companion object {
         private const val TAG = "ScheduleViewModel"
     }
+
+    private val _uiState = MutableStateFlow(ScheduleUiState())
+    val uiState: StateFlow<ScheduleUiState> = _uiState.asStateFlow()
+
 
     fun addTask(task: String) {
         if (task.isBlank()) {
@@ -62,64 +62,33 @@ class ScheduleViewModel @Inject constructor(
     }
 
     /**
-     * 현재 스케줄을 데이터베이스에 저장
+     * 현재 스케줄 저장 - Repository로 위임
      */
     fun saveCurrentSchedule(title: String = "오늘의 계획") {
         val currentState = _uiState.value
 
         if (currentState.generatedSchedule.isEmpty()) {
-            _uiState.update {
-                it.copy(errorMessage = "저장할 스케줄이 없습니다")
-            }
+            _uiState.update { it.copy(errorMessage = "저장할 스케줄이 없습니다") }
             return
         }
 
         viewModelScope.launch {
-            try {
-                Log.d(TAG, "스케줄 저장 시작")
-
-                // 1. 스케줄 엔티티 생성
-                val scheduleId = "schedule_${System.currentTimeMillis()}"
-                val scheduleEntity = SavedScheduleEntity(
-                    id = scheduleId,
-                    title = title,
-                    date = getTodayDateString(),
-                    startTime = currentState.startTime,
-                    endTime = currentState.endTime,
-                    totalTasks = currentState.generatedSchedule.size,
-                    completedTasks = 0
-                )
-
-                // 2. 작업 엔티티들 생성
-                val taskEntities = currentState.generatedSchedule.mapIndexed { index, task ->
-                    SavedTaskEntity(
-                        id = "task_${scheduleId}_$index",
-                        scheduleId = scheduleId,
-                        title = task.title,
-                        description = task.description,
-                        startTime = task.startTime,
-                        endTime = task.endTime,
-                        isCompleted = task.isCompleted,
-                        sortOrder = index
-                    )
+            savedScheduleRepository.saveSchedule(
+                tasks = currentState.generatedSchedule,
+                title = title,
+                date = getTodayDateString(),
+                startTime = currentState.startTime,
+                endTime = currentState.endTime
+            ).fold(
+                onSuccess = { scheduleId ->
+                    Log.d(TAG, "스케줄 저장 성공: $scheduleId")
+                    _uiState.update { it.copy(errorMessage = "✅ 계획이 저장되었습니다!") }
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "스케줄 저장 실패", exception)
+                    _uiState.update { it.copy(errorMessage = "저장 중 오류가 발생했습니다") }
                 }
-
-                // 3. 데이터베이스에 저장
-                savedScheduleDao.insertSchedule(scheduleEntity)
-                savedScheduleDao.insertTasks(taskEntities)
-
-                Log.d(TAG, "스케줄 저장 성공: $scheduleId")
-
-                _uiState.update {
-                    it.copy(errorMessage = "✅ 계획이 저장되었습니다!")
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "스케줄 저장 실패", e)
-                _uiState.update {
-                    it.copy(errorMessage = "저장 중 오류가 발생했습니다: ${e.message}")
-                }
-            }
+            )
         }
     }
 
@@ -183,20 +152,16 @@ class ScheduleViewModel @Inject constructor(
 
                 Log.d(TAG, "요청 생성: ${request.getSummary()}")
 
-                //Use Case 실행
                 val result = generateScheduleUseCase(request)
 
                 result
                     .onSuccess { schedule ->
                         Log.d(TAG, "스케줄 생성 성공: ${schedule.getSummary()}")
 
-                        // Domain Task를 UI용 Task로 변환
-                        val uiTasks = convertToDataTasks(schedule.tasks)
-
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                generatedSchedule = uiTasks,
+                                generatedSchedule = schedule.tasks,
                                 isScheduleGenerated = true,
                                 errorMessage = null
                             )
@@ -227,23 +192,6 @@ class ScheduleViewModel @Inject constructor(
                     )
                 }
             }
-        }
-    }
-
-    /**
-     * Domain Task를 Data Task로 변환 (UI 호환성)
-     */
-    private fun convertToDataTasks(domainTasks: List<Task>): List<Task> {
-        return domainTasks.map { domainTask ->
-            Task(
-                id = domainTask.id,
-                title = domainTask.title,
-                description = domainTask.description,
-                startTime = domainTask.startTime,
-                endTime = domainTask.endTime,
-                date = domainTask.date,
-                isCompleted = domainTask.isCompleted
-            )
         }
     }
 
@@ -309,13 +257,9 @@ class ScheduleViewModel @Inject constructor(
     fun updateTaskTime(taskId: String, newStartTime: String, newEndTime: String) {
         viewModelScope.launch {
             try {
-                Log.d(TAG, "작업 시간 업데이트 시작: $taskId ($newStartTime-$newEndTime)")
-
                 // 1. 시간 유효성 검증
                 if (!isValidTimeFormat(newStartTime) || !isValidTimeFormat(newEndTime)) {
-                    _uiState.update {
-                        it.copy(errorMessage = "올바르지 않은 시간 형식입니다")
-                    }
+                    _uiState.update { it.copy(errorMessage = "올바르지 않은 시간 형식입니다") }
                     return@launch
                 }
 
@@ -323,23 +267,17 @@ class ScheduleViewModel @Inject constructor(
                 val endMinutes = timeToMinutes(newEndTime)
 
                 if (endMinutes <= startMinutes) {
-                    _uiState.update {
-                        it.copy(errorMessage = "종료 시간은 시작 시간보다 늦어야 합니다")
-                    }
+                    _uiState.update { it.copy(errorMessage = "종료 시간은 시작 시간보다 늦어야 합니다") }
                     return@launch
                 }
 
-                // 2. 스마트 스케줄 조정 실행
+                // 2. 스마트 조정 실행
                 val currentTasks = _uiState.value.generatedSchedule
-                val adjustedTasks = smartAdjustSchedule(
-                    currentTasks = currentTasks,
-                    editingTaskId = taskId,
-                    newStartTime = newStartTime,
-                    newEndTime = newEndTime
-                )
+                val adjustedTasks =
+                    smartAdjustSchedule(currentTasks, taskId, newStartTime, newEndTime)
 
                 if (adjustedTasks != null) {
-                    // 조정 성공
+                    // 3. UI 업데이트
                     _uiState.update {
                         it.copy(
                             generatedSchedule = adjustedTasks,
@@ -347,22 +285,17 @@ class ScheduleViewModel @Inject constructor(
                         )
                     }
 
-                    // 변경된 작업들만 데이터베이스 업데이트
+                    // 4. Repository로 DB 업데이트
                     val changedTasks = findChangedTasks(currentTasks, adjustedTasks)
-                    updateMultipleTasksInDatabase(changedTasks)
+                    savedScheduleRepository.updateMultipleTasks(changedTasks)
 
                 } else {
-                    // 조정 실패
-                    _uiState.update {
-                        it.copy(errorMessage = "⚠️ 시간 조정이 불가능합니다. 다른 시간을 선택해주세요")
-                    }
+                    _uiState.update { it.copy(errorMessage = "⚠️ 시간 조정이 불가능합니다") }
                 }
 
             } catch (e: Exception) {
                 Log.e(TAG, "작업 시간 업데이트 실패", e)
-                _uiState.update {
-                    it.copy(errorMessage = "시간 수정 중 오류가 발생했습니다")
-                }
+                _uiState.update { it.copy(errorMessage = "시간 수정 중 오류가 발생했습니다") }
             }
         }
     }
@@ -485,78 +418,36 @@ class ScheduleViewModel @Inject constructor(
         return String.format("%02d:%02d", hour, minute)
     }
 
-    // 여러 작업을 데이터베이스에 업데이트
-    private suspend fun updateMultipleTasksInDatabase(tasks: List<Task>) {
-        try {
-            tasks.forEach { task ->
-                if (task.id.startsWith("task_schedule_")) {
-                    savedScheduleDao.updateTaskTime(task.id, task.startTime, task.endTime)
-                }
-            }
-
-            // 스케줄 수정 시간 업데이트
-            tasks.firstOrNull()?.let { firstTask ->
-                val scheduleId = extractScheduleIdFromTaskId(firstTask.id)
-                if (scheduleId.isNotEmpty()) {
-                    savedScheduleDao.updateScheduleLastModified(
-                        scheduleId,
-                        System.currentTimeMillis()
-                    )
-                }
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "데이터베이스 일괄 업데이트 실패", e)
-        }
-    }
-
-
     /**
      * 저장된 오늘 스케줄 불러오기
      */
     fun loadTodaySchedule() {
         viewModelScope.launch {
-            try {
-                Log.d(TAG, "오늘 스케줄 불러오기 시작")
+            val today = getTodayDateString()
+            savedScheduleRepository.getScheduleByDate(today).fold(
+                onSuccess = { tasks ->
+                    if (tasks != null && tasks.isNotEmpty()) {
+                        Log.d(TAG, "저장된 스케줄 발견: ${tasks.size}개 작업")
 
-                val today = getTodayDateString()
-                val savedSchedule = savedScheduleDao.getScheduleByDate(today)
-
-                if (savedSchedule != null) {
-                    Log.d(TAG, "저장된 스케줄 발견: ${savedSchedule.schedule.title}")
-
-                    // 저장된 데이터를 UI 모델로 변환
-                    val uiTasks = savedSchedule.tasks.map { taskEntity ->
-                        Task(
-                            id = taskEntity.id,
-                            title = taskEntity.title,
-                            description = taskEntity.description,
-                            startTime = taskEntity.startTime,
-                            endTime = taskEntity.endTime,
-                            date = savedSchedule.schedule.date,
-                            isCompleted = taskEntity.isCompleted
-                        )
-                    }.sortedBy { it.startTime }
-
-                    _uiState.update {
-                        it.copy(
-                            generatedSchedule = uiTasks,
-                            isScheduleGenerated = true,
-                            startTime = savedSchedule.schedule.startTime,
-                            endTime = savedSchedule.schedule.endTime,
-                            errorMessage = "저장된 계획을 불러왔습니다"
-                        )
+                        _uiState.update {
+                            it.copy(
+                                generatedSchedule = tasks,
+                                isScheduleGenerated = true,
+                                currentScreen = AppScreen.SCHEDULE_RESULT,
+                                startTime = tasks.firstOrNull()?.startTime ?: "09:00",
+                                endTime = tasks.lastOrNull()?.endTime ?: "18:00",
+                                errorMessage = "💾 저장된 계획을 불러왔습니다"
+                            )
+                        }
+                    } else {
+                        Log.d(TAG, "오늘 저장된 스케줄 없음")
                     }
-                } else {
-                    Log.d(TAG, "오늘 저장된 스케줄 없음")
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "스케줄 불러오기 실패", exception)
+                    _uiState.update { it.copy(errorMessage = "저장된 계획을 불러올 수 없습니다") }
                 }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "스케줄 불러오기 실패", e)
-                _uiState.update {
-                    it.copy(errorMessage = "저장된 계획을 불러올 수 없습니다")
-                }
-            }
+            )
         }
     }
 
@@ -565,36 +456,21 @@ class ScheduleViewModel @Inject constructor(
      */
     fun updateTaskCompletion(taskId: String, isCompleted: Boolean) {
         viewModelScope.launch {
-            try {
-                // 1. 데이터베이스 업데이트
-                savedScheduleDao.updateTaskCompletion(taskId, isCompleted)
-
-                // 2. UI 상태 업데이트
-                val updatedTasks = _uiState.value.generatedSchedule.map { task ->
-                    if (task.id == taskId) {
-                        task.copy(isCompleted = isCompleted)
-                    } else {
-                        task
-                    }
-                }
-
-                _uiState.update {
-                    it.copy(generatedSchedule = updatedTasks)
-                }
-
-                // 3. 스케줄의 완료 카운트 업데이트
-                if (taskId.contains("task_schedule_")) {
-                    val scheduleId = taskId.substringAfter("task_").substringBefore("_")
-                    if (scheduleId.isNotEmpty()) {
-                        savedScheduleDao.updateScheduleCompletionCount("schedule_$scheduleId")
-                    }
-                }
-
-                Log.d(TAG, "작업 완료 상태 업데이트: $taskId -> $isCompleted")
-
-            } catch (e: Exception) {
-                Log.e(TAG, "작업 상태 업데이트 실패", e)
+            // 1. UI 즉시 업데이트
+            val updatedTasks = _uiState.value.generatedSchedule.map { task ->
+                if (task.id == taskId) task.copy(isCompleted = isCompleted) else task
             }
+            _uiState.update { it.copy(generatedSchedule = updatedTasks) }
+
+            // 2. Repository로 DB 업데이트
+            savedScheduleRepository.updateTaskCompletion(taskId, isCompleted).fold(
+                onSuccess = {
+                    Log.d(TAG, "작업 완료 상태 업데이트 성공: $taskId -> $isCompleted")
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "작업 상태 업데이트 실패", exception)
+                }
+            )
         }
     }
 
@@ -613,17 +489,75 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
-    private fun extractScheduleIdFromTaskId(taskId: String): String {
-        return try {
-            if (taskId.startsWith("task_schedule_")) {
-                val parts = taskId.split("_")
-                if (parts.size >= 3) {
-                    "schedule_${parts[2]}"
-                } else ""
-            } else ""
-        } catch (e: Exception) {
-            ""
+    fun navigateToSavedSchedules() {
+        _uiState.update { it.copy(currentScreen = AppScreen.SAVED_SCHEDULES) }
+        loadSavedSchedules()
+    }
+
+    fun navigateToHome() {
+        _uiState.update {
+            it.copy(
+                currentScreen = AppScreen.HOME,
+                isScheduleGenerated = false,
+                isEditMode = false,
+                errorMessage = null
+            )
         }
     }
 
+    fun loadSavedSchedules() {
+        viewModelScope.launch {
+            val endDate = getTodayDateString()
+            val startDate = getDateBefore(endDate, 7)
+
+            savedScheduleRepository.getSavedSchedulesList(startDate, endDate).fold(
+                onSuccess = { scheduleItems ->
+                    _uiState.update { it.copy(savedSchedules = scheduleItems) }
+                    Log.d(TAG, "저장된 계획 ${scheduleItems.size}개 불러오기 완료")
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "저장된 계획 불러오기 실패", exception)
+                    _uiState.update { it.copy(errorMessage = "저장된 계획을 불러올 수 없습니다") }
+                }
+            )
+        }
+    }
+
+    fun loadSavedSchedule(scheduleId: String) {
+        viewModelScope.launch {
+            savedScheduleRepository.getScheduleById(scheduleId).fold(
+                onSuccess = { tasks ->
+                    if (tasks != null && tasks.isNotEmpty()) {
+                        _uiState.update {
+                            it.copy(
+                                generatedSchedule = tasks,
+                                isScheduleGenerated = true,
+                                currentScreen = AppScreen.SCHEDULE_RESULT,
+                                startTime = tasks.firstOrNull()?.startTime ?: "09:00",
+                                endTime = tasks.lastOrNull()?.endTime ?: "18:00",
+                                errorMessage = "💾 저장된 계획을 불러왔습니다"
+                            )
+                        }
+                    }
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "저장된 계획 불러오기 실패", exception)
+                    _uiState.update { it.copy(errorMessage = "계획을 불러올 수 없습니다") }
+                }
+            )
+        }
+    }
+
+    private fun getDateBefore(date: String, days: Int): String {
+        return try {
+            val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val currentDate = formatter.parse(date) ?: Date()
+            val calendar = Calendar.getInstance()
+            calendar.time = currentDate
+            calendar.add(Calendar.DAY_OF_MONTH, -days)
+            formatter.format(calendar.time)
+        } catch (e: Exception) {
+            date
+        }
+    }
 }
