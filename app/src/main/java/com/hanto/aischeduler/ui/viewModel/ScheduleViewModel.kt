@@ -329,78 +329,32 @@ class ScheduleViewModel @Inject constructor(
                     return@launch
                 }
 
-                // 2. 다른 작업들과의 충돌 체크
+                // 2. 스마트 스케줄 조정 실행
                 val currentTasks = _uiState.value.generatedSchedule
-                val conflictingTasks = findConflictingTasks(
+                val adjustedTasks = smartAdjustSchedule(
                     currentTasks = currentTasks,
                     editingTaskId = taskId,
                     newStartTime = newStartTime,
                     newEndTime = newEndTime
                 )
 
-                if (conflictingTasks.isNotEmpty()) {
-                    // 충돌 발견 - 자동 조정 시도
-                    val adjustedTasks = autoAdjustConflictingTasks(
-                        currentTasks = currentTasks,
-                        editingTaskId = taskId,
-                        newStartTime = newStartTime,
-                        newEndTime = newEndTime,
-                        conflictingTasks = conflictingTasks
-                    )
-
-                    if (adjustedTasks != null) {
-                        // 자동 조정 성공
-                        _uiState.update {
-                            it.copy(
-                                generatedSchedule = adjustedTasks,
-                                errorMessage = "⚡ 다른 작업들의 시간을 자동으로 조정했습니다"
-                            )
-                        }
-
-                        // 모든 변경된 작업들을 데이터베이스에 업데이트
-                        updateMultipleTasksInDatabase(adjustedTasks.filter {
-                            it.id == taskId || conflictingTasks.any { conflict -> conflict.id == it.id }
-                        })
-
-                    } else {
-                        // 자동 조정 실패 - 사용자에게 알림
-                        val conflictNames = conflictingTasks.joinToString(", ") { it.title }
-                        _uiState.update {
-                            it.copy(errorMessage = "⚠️ 다음 작업과 시간이 겹칩니다: $conflictNames")
-                        }
-                    }
-
-                } else {
-                    // 충돌 없음 - 정상 업데이트
-                    val updatedTasks = currentTasks.map { task ->
-                        if (task.id == taskId) {
-                            task.copy(
-                                startTime = newStartTime,
-                                endTime = newEndTime
-                            )
-                        } else {
-                            task
-                        }
-                    }
-
+                if (adjustedTasks != null) {
+                    // 조정 성공
                     _uiState.update {
                         it.copy(
-                            generatedSchedule = updatedTasks,
-                            errorMessage = "⏰ 시간이 수정되었습니다"
+                            generatedSchedule = adjustedTasks,
+                            errorMessage = "⚡ 스케줄을 스마트하게 조정했습니다"
                         )
                     }
 
-                    // 데이터베이스 업데이트
-                    if (taskId.startsWith("task_schedule_")) {
-                        savedScheduleDao.updateTaskTime(taskId, newStartTime, newEndTime)
+                    // 변경된 작업들만 데이터베이스 업데이트
+                    val changedTasks = findChangedTasks(currentTasks, adjustedTasks)
+                    updateMultipleTasksInDatabase(changedTasks)
 
-                        val scheduleId = extractScheduleIdFromTaskId(taskId)
-                        if (scheduleId.isNotEmpty()) {
-                            savedScheduleDao.updateScheduleLastModified(
-                                scheduleId,
-                                System.currentTimeMillis()
-                            )
-                        }
+                } else {
+                    // 조정 실패
+                    _uiState.update {
+                        it.copy(errorMessage = "⚠️ 시간 조정이 불가능합니다. 다른 시간을 선택해주세요")
                     }
                 }
 
@@ -413,69 +367,113 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
-    // 충돌하는 작업들 찾기
-    private fun findConflictingTasks(
+    private fun smartAdjustSchedule(
         currentTasks: List<Task>,
         editingTaskId: String,
         newStartTime: String,
         newEndTime: String
-    ): List<Task> {
-        val newStartMinutes = timeToMinutes(newStartTime)
-        val newEndMinutes = timeToMinutes(newEndTime)
-
-        return currentTasks.filter { task ->
-            if (task.id == editingTaskId) return@filter false
-
-            val taskStartMinutes = timeToMinutes(task.startTime)
-            val taskEndMinutes = timeToMinutes(task.endTime)
-
-            // 시간 겹침 체크
-            newStartMinutes < taskEndMinutes && newEndMinutes > taskStartMinutes
-        }
-    }
-
-    // 충돌하는 작업들을 자동으로 조정
-    private fun autoAdjustConflictingTasks(
-        currentTasks: List<Task>,
-        editingTaskId: String,
-        newStartTime: String,
-        newEndTime: String,
-        conflictingTasks: List<Task>
     ): List<Task>? {
         return try {
-            val adjustedTasks = currentTasks.toMutableList()
-            val newEndMinutes = timeToMinutes(newEndTime)
+            val tasks = currentTasks.toMutableList()
+            val editingTaskIndex = tasks.indexOfFirst { it.id == editingTaskId }
 
-            // 편집 중인 작업 업데이트
-            val editingTaskIndex = adjustedTasks.indexOfFirst { it.id == editingTaskId }
-            if (editingTaskIndex >= 0) {
-                adjustedTasks[editingTaskIndex] = adjustedTasks[editingTaskIndex].copy(
-                    startTime = newStartTime,
-                    endTime = newEndTime
-                )
+            if (editingTaskIndex < 0) return null
+
+            // 1. 편집 중인 작업 업데이트
+            val originalTask = tasks[editingTaskIndex]
+            val editedTask = originalTask.copy(
+                startTime = newStartTime,
+                endTime = newEndTime
+            )
+            tasks[editingTaskIndex] = editedTask
+
+            // 2. 시간순으로 정렬
+            val sortedTasks = tasks.sortedBy { timeToMinutes(it.startTime) }
+            val adjustedTasks = mutableListOf<Task>()
+
+            // 3. 순차적으로 배치하면서 공백 제거
+            sortedTasks.forEachIndexed { index, task ->
+                val adjustedTask = if (index == 0) {
+                    // 첫 번째 작업은 그대로
+                    task
+                } else {
+                    val previousTask = adjustedTasks[index - 1]
+                    val previousEndMinutes = timeToMinutes(previousTask.endTime)
+                    val currentStartMinutes = timeToMinutes(task.startTime)
+
+                    if (currentStartMinutes > previousEndMinutes) {
+                        // 공백이 있으면 앞으로 당기기
+                        val duration = task.getDurationMinutes()
+                        val newStart = minutesToTime(previousEndMinutes)
+                        val newEnd = minutesToTime(previousEndMinutes + duration)
+
+                        Log.d(
+                            TAG,
+                            "공백 제거: ${task.title} ${task.startTime}-${task.endTime} → $newStart-$newEnd"
+                        )
+
+                        task.copy(
+                            startTime = newStart,
+                            endTime = newEnd
+                        )
+                    } else if (currentStartMinutes < previousEndMinutes) {
+                        // 겹치면 뒤로 밀기
+                        val duration = task.getDurationMinutes()
+                        val newStart = minutesToTime(previousEndMinutes)
+                        val newEnd = minutesToTime(previousEndMinutes + duration)
+
+                        Log.d(
+                            TAG,
+                            "충돌 해결: ${task.title} ${task.startTime}-${task.endTime} → $newStart-$newEnd"
+                        )
+
+                        task.copy(
+                            startTime = newStart,
+                            endTime = newEnd
+                        )
+                    } else {
+                        // 완벽하게 이어지는 경우
+                        task
+                    }
+                }
+
+                // 하루 범위 체크
+                if (timeToMinutes(adjustedTask.endTime) > 24 * 60) {
+                    Log.w(TAG, "작업이 하루 범위를 벗어남: ${adjustedTask.title}")
+                    return null
+                }
+
+                adjustedTasks.add(adjustedTask)
             }
 
-            // 충돌하는 작업들을 편집된 작업 이후 시간으로 밀기
-            conflictingTasks.sortedBy { timeToMinutes(it.startTime) }.forEach { conflictTask ->
-                val taskIndex = adjustedTasks.indexOfFirst { it.id == conflictTask.id }
-                if (taskIndex >= 0) {
-                    val originalDuration =
-                        timeToMinutes(conflictTask.endTime) - timeToMinutes(conflictTask.startTime)
-                    val newStartTime = minutesToTime(newEndMinutes)
-                    val newEndTime = minutesToTime(newEndMinutes + originalDuration)
-
-                    adjustedTasks[taskIndex] = adjustedTasks[taskIndex].copy(
-                        startTime = newStartTime,
-                        endTime = newEndTime
-                    )
+            // 4. 최종 검증
+            for (i in adjustedTasks.indices) {
+                for (j in i + 1 until adjustedTasks.size) {
+                    if (adjustedTasks[i].overlapsWith(adjustedTasks[j])) {
+                        Log.w(
+                            TAG,
+                            "조정 후에도 충돌: ${adjustedTasks[i].title} vs ${adjustedTasks[j].title}"
+                        )
+                        return null
+                    }
                 }
             }
 
             adjustedTasks.toList()
 
         } catch (e: Exception) {
-            Log.e(TAG, "자동 조정 실패", e)
+            Log.e(TAG, "스마트 조정 실패", e)
             null
+        }
+    }
+
+    // 변경된 작업들 찾기
+    private fun findChangedTasks(originalTasks: List<Task>, adjustedTasks: List<Task>): List<Task> {
+        return adjustedTasks.filter { adjusted ->
+            val original = originalTasks.find { it.id == adjusted.id }
+            original == null ||
+                    original.startTime != adjusted.startTime ||
+                    original.endTime != adjusted.endTime
         }
     }
 
