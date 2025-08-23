@@ -87,17 +87,17 @@ fun TimeSettingCard(
                     modifier = Modifier.weight(1f)
                 )
                 PresetButton(
-                    text = "09 - 22",
+                    text = "19 - 22",
                     onClick = {
-                        onStartTimeChange("09:00")
+                        onStartTimeChange("19:00")
                         onEndTimeChange("22:00")
                     },
                     modifier = Modifier.weight(1f)
                 )
                 PresetButton(
-                    text = "19 - 22",
+                    text = "09 - 22",
                     onClick = {
-                        onStartTimeChange("19:00")
+                        onStartTimeChange("09:00")
                         onEndTimeChange("22:00")
                     },
                     modifier = Modifier.weight(1f)
