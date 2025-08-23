@@ -560,4 +560,44 @@ class ScheduleViewModel @Inject constructor(
             date
         }
     }
+
+    /**
+     * 저장된 계획 삭제
+     */
+    fun deleteSavedSchedule(scheduleId: String) {
+        viewModelScope.launch {
+            savedScheduleRepository.deleteSchedule(scheduleId).fold(
+                onSuccess = {
+                    Log.d(TAG, "계획 삭제 성공: $scheduleId")
+
+                    // 목록에서 해당 아이템 제거
+                    val updatedSchedules = _uiState.value.savedSchedules.filter {
+                        it.id != scheduleId
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            savedSchedules = updatedSchedules,
+                            errorMessage = "🗑️ 계획이 삭제되었습니다"
+                        )
+                    }
+
+                    // 만약 현재 보고 있는 스케줄이 삭제된 것이라면 홈으로
+                    if (_uiState.value.currentScreen == AppScreen.SCHEDULE_RESULT) {
+                        val currentScheduleId = _uiState.value.generatedSchedule.firstOrNull()?.id
+                        if (currentScheduleId?.contains(scheduleId.removePrefix("schedule_")) == true) {
+                            navigateToHome()
+                        }
+                    }
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "계획 삭제 실패", exception)
+                    _uiState.update {
+                        it.copy(errorMessage = "삭제 중 오류가 발생했습니다")
+                    }
+                }
+            )
+        }
+    }
+
 }

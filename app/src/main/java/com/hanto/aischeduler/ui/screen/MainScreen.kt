@@ -80,7 +80,7 @@ fun MainScreen(
                 tasks = uiState.generatedSchedule,
                 isEditMode = uiState.isEditMode,
                 errorMessage = uiState.errorMessage,
-                onBack = { viewModel.navigateToHome() }, // 👈 navigateToHome으로 변경
+                onBack = { viewModel.navigateToHome() },
                 onToggleEditMode = { viewModel.toggleEditMode() },
                 onReorderTasks = { fromIndex, toIndex ->
                     viewModel.reorderTasks(fromIndex, toIndex)
@@ -110,7 +110,10 @@ fun MainScreen(
                 onScheduleClick = { scheduleId ->
                     viewModel.loadSavedSchedule(scheduleId)
                 },
-                onNewSchedule = { viewModel.navigateToHome() }
+                onNewSchedule = { viewModel.navigateToHome() },
+                onDeleteSchedule = { scheduleId ->
+                    viewModel.deleteSavedSchedule(scheduleId)
+                }
             )
         }
     }

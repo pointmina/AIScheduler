@@ -401,7 +401,7 @@ private fun ScheduleStatsCard(
 
             // 격려 메시지
             Surface(
-                modifier = Modifier.fillMaxWidth(), // 👈 가로 match_parent
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
                 color = AppColors.Primary.copy(alpha = 0.1f)
             ) {
