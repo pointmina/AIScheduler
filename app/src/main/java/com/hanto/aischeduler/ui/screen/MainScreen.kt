@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -31,6 +32,8 @@ import com.hanto.aischeduler.ui.components.SolidBackground
 import com.hanto.aischeduler.ui.components.TaskInputCard
 import com.hanto.aischeduler.ui.components.TaskListCard
 import com.hanto.aischeduler.ui.components.TimeSettingCard
+import com.hanto.aischeduler.ui.viewModel.AppScreen
+import com.hanto.aischeduler.ui.viewModel.ScheduleUiState
 import com.hanto.aischeduler.ui.viewModel.ScheduleViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -45,40 +48,88 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     var newTask by remember { mutableStateOf("") }
 
+    // 앱 시작시 저장된 오늘 스케줄 불러오기
     LaunchedEffect(Unit) {
         viewModel.loadTodaySchedule()
     }
 
-    // 스케줄이 생성되면 결과 화면으로 이동
-    if (uiState.isScheduleGenerated) {
-        ScheduleResultScreen(
-            tasks = uiState.generatedSchedule,
-            isEditMode = uiState.isEditMode,
-            errorMessage = uiState.errorMessage,
-            onBack = { viewModel.backToInput() },
-            onToggleEditMode = { viewModel.toggleEditMode() },
-            onReorderTasks = { fromIndex, toIndex ->
-                viewModel.reorderTasks(fromIndex, toIndex)
-            },
-            onUpdateTaskTime = { taskId, startTime, endTime ->
-                viewModel.updateTaskTime(taskId, startTime, endTime)
-            },
-            onSplitSchedule = { viewModel.splitSchedule() },
-            onExtendEndTime = { viewModel.extendEndTime() },
-            onClearError = { viewModel.clearError() },
-            onSave = {
-                viewModel.saveCurrentSchedule("오늘의 계획")
-            },
-            onSetAlarm = {
-                // TODO: 알림 설정 기능
-            },
-            onTaskCompletionToggle = { taskId, isCompleted ->
-                viewModel.updateTaskCompletion(taskId, isCompleted)
-            }
-        )
-        return
-    }
+    // 👇 화면 분기 처리 추가
+    when (uiState.currentScreen) {
+        AppScreen.HOME -> {
+            HomeContent(
+                uiState = uiState,
+                newTask = newTask,
+                onTaskTextChange = { newTask = it },
+                onAddTask = {
+                    if (newTask.isNotBlank()) {
+                        viewModel.addTask(newTask)
+                        newTask = ""
+                    }
+                },
+                onDeleteTask = { viewModel.removeTask(it) },
+                onStartTimeChange = { viewModel.updateStartTime(it) },
+                onEndTimeChange = { viewModel.updateEndTime(it) },
+                onGenerateSchedule = { viewModel.generateSchedule() },
+                onNavigateToSavedSchedules = { viewModel.navigateToSavedSchedules() },
+                onClearError = { viewModel.clearError() }
+            )
+        }
 
+        AppScreen.SCHEDULE_RESULT -> {
+            ScheduleResultScreen(
+                tasks = uiState.generatedSchedule,
+                isEditMode = uiState.isEditMode,
+                errorMessage = uiState.errorMessage,
+                onBack = { viewModel.navigateToHome() }, // 👈 navigateToHome으로 변경
+                onToggleEditMode = { viewModel.toggleEditMode() },
+                onReorderTasks = { fromIndex, toIndex ->
+                    viewModel.reorderTasks(fromIndex, toIndex)
+                },
+                onUpdateTaskTime = { taskId, startTime, endTime ->
+                    viewModel.updateTaskTime(taskId, startTime, endTime)
+                },
+                onSplitSchedule = { viewModel.splitSchedule() },
+                onExtendEndTime = { viewModel.extendEndTime() },
+                onClearError = { viewModel.clearError() },
+                onSave = {
+                    viewModel.saveCurrentSchedule("오늘의 계획")
+                },
+                onSetAlarm = {
+                    // TODO: 알림 설정 기능
+                },
+                onTaskCompletionToggle = { taskId, isCompleted ->
+                    viewModel.updateTaskCompletion(taskId, isCompleted)
+                }
+            )
+        }
+
+        AppScreen.SAVED_SCHEDULES -> {
+            SavedSchedulesScreen(
+                savedSchedules = uiState.savedSchedules,
+                onBack = { viewModel.navigateToHome() },
+                onScheduleClick = { scheduleId ->
+                    viewModel.loadSavedSchedule(scheduleId)
+                },
+                onNewSchedule = { viewModel.navigateToHome() }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeContent(
+    uiState: ScheduleUiState,
+    newTask: String,
+    onTaskTextChange: (String) -> Unit,
+    onAddTask: () -> Unit,
+    onDeleteTask: (String) -> Unit,
+    onStartTimeChange: (String) -> Unit,
+    onEndTimeChange: (String) -> Unit,
+    onGenerateSchedule: () -> Unit,
+    onNavigateToSavedSchedules: () -> Unit,
+    onClearError: () -> Unit
+) {
     SolidBackground {
         Column(
             modifier = Modifier
@@ -93,6 +144,15 @@ fun MainScreen(
                         color = Color.Black,
                         fontWeight = FontWeight.Bold
                     )
+                },
+                actions = {
+                    // 저장된 계획 보기 버튼
+                    IconButton(onClick = onNavigateToSavedSchedules) {
+                        Text(
+                            "📋",
+                            fontSize = 20.sp
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent
@@ -118,8 +178,8 @@ fun MainScreen(
                 TimeSettingCard(
                     startTime = uiState.startTime,
                     endTime = uiState.endTime,
-                    onStartTimeChange = { viewModel.updateStartTime(it) },
-                    onEndTimeChange = { viewModel.updateEndTime(it) },
+                    onStartTimeChange = onStartTimeChange,
+                    onEndTimeChange = onEndTimeChange,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(0.3f)
@@ -128,13 +188,8 @@ fun MainScreen(
                 // 할 일 입력 카드
                 TaskInputCard(
                     taskText = newTask,
-                    onTaskTextChange = { newTask = it },
-                    onAddTask = {
-                        if (newTask.isNotBlank()) {
-                            viewModel.addTask(newTask)
-                            newTask = ""
-                        }
-                    },
+                    onTaskTextChange = onTaskTextChange,
+                    onAddTask = onAddTask,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(0.20f)
@@ -143,9 +198,7 @@ fun MainScreen(
                 // 할 일 목록 카드
                 TaskListCard(
                     tasks = uiState.tasks,
-                    onDeleteTask = { taskToDelete ->
-                        viewModel.removeTask(taskToDelete)
-                    },
+                    onDeleteTask = onDeleteTask,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(0.3f)
@@ -153,9 +206,7 @@ fun MainScreen(
 
                 // AI 생성 버튼
                 AIGenerateButton(
-                    onClick = {
-                        viewModel.generateSchedule()
-                    },
+                    onClick = onGenerateSchedule,
                     isLoading = uiState.isLoading,
                     enabled = uiState.tasks.isNotEmpty(),
                     modifier = Modifier
@@ -188,9 +239,9 @@ fun MainScreen(
                         ErrorDisplay(
                             message = error,
                             type = errorType,
-                            onDismiss = { viewModel.clearError() },
+                            onDismiss = onClearError,
                             onRetry = if (errorType != ErrorType.INFO) {
-                                { viewModel.generateSchedule() }
+                                onGenerateSchedule
                             } else null
                         )
                     }
