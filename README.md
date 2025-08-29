@@ -1,5 +1,10 @@
 # AI Scheduler
 
+
+https://github.com/user-attachments/assets/e326b881-c3ba-4357-8122-57ad57a2e4ce
+
+
+
 Android app that converts to-do lists into time-blocked schedules using AI.
 
 ## Features
